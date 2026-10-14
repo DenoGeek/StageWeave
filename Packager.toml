@@ -1,0 +1,63 @@
+# cargo-packager configuration for MusicKit.
+# Schema: https://github.com/crabnebula-dev/cargo-packager/blob/main/crates/packager/schema.json
+#
+# NOTE: a standalone Packager.toml is NOT merged with Cargo.toml metadata, so
+# `version`, `binaries` and the output dirs must be set here explicitly.
+# The release workflow overwrites `version` (from Cargo.toml) and
+# `binariesDir` (per target triple) before packaging; keep both as single-line
+# `key = "value"` entries so that rewrite keeps working.
+#
+# Local use (macOS example):
+#   cargo build --release && cargo packager --formats dmg
+# Installers are written to target/packages/.
+
+# `name` must be set explicitly: cargo-packager 0.11 fails to infer it for a
+# standalone Packager.toml (it tries to chdir into the file path).
+name = "musickit"
+productName = "MusicKit"
+version = "0.1.0"
+identifier = "com.codefamiliar.musickit"
+description = "Stem splitting, mixing and lyric videos for worship teams"
+longDescription = "MusicKit is a desktop toolkit for worship teams: split songs into stems, mix them, and produce lyric videos."
+publisher = "CodeFamiliar"
+authors = ["CodeFamiliar"]
+category = "Music"
+outDir = "target/packages"
+binariesDir = "target/release"
+icons = [
+  "assets/icons/32x32.png",
+  "assets/icons/64x64.png",
+  "assets/icons/128x128.png",
+  "assets/icons/256x256.png",
+  "assets/icons/512x512.png",
+]
+
+[[binaries]]
+path = "musickit"
+main = true
+
+[macos]
+minimumSystemVersion = "11.0"
+
+[deb]
+section = "sound"
+# Runtime libraries for cpal (ALSA), winit/wgpu (X11, Wayland, Vulkan/EGL)
+# and rfd (xdg-desktop-portal file dialogs).
+depends = [
+  "libasound2",
+  "libgtk-3-0",
+  "libxkbcommon0",
+  "libxkbcommon-x11-0",
+  "libwayland-client0",
+  "libx11-6",
+  "libxcursor1",
+  "libxrandr2",
+  "libxi6",
+  "libvulkan1",
+  "libegl1",
+  "xdg-desktop-portal",
+]
+
+[nsis]
+installerIcon = "assets/icons/icon.ico"
+installMode = "currentUser"

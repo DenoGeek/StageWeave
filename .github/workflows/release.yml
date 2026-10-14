@@ -1,0 +1,183 @@
+# Release pipeline for MusicKit.
+#
+# Triggers
+#   - Push a tag matching v* (e.g. `git tag v0.1.0 && git push origin v0.1.0`):
+#     builds every installer and publishes them to the GitHub Release for that tag.
+#     The tag must match the `version` in Cargo.toml (v0.1.0 <-> 0.1.0), or the run fails.
+#   - Manual "Run workflow" (workflow_dispatch): builds every installer and uploads
+#     them as workflow artifacts only (no release is created).
+#
+# Outputs (packaged with cargo-packager, config in Packager.toml)
+#   Linux    musickit_<ver>_amd64.deb          (built on Ubuntu 22.04 -> glibc 2.35+)
+#   Windows  MusicKit_<ver>_x64-setup.exe      (NSIS, per-user install, no admin)
+#   macOS    MusicKit_<ver>_aarch64.dmg        (Apple Silicon)
+#            MusicKit_<ver>_x64.dmg            (Intel, cross-compiled on an arm64 runner;
+#                                               the macos-13 Intel runner image is retired)
+#
+# Unsigned builds
+#   macOS: the app is not signed or notarized, so Gatekeeper will say it "is damaged"
+#   or "cannot be opened". After dragging MusicKit to Applications, either
+#   right-click MusicKit.app -> Open -> Open, or run:
+#       xattr -dr com.apple.quarantine /Applications/MusicKit.app
+#   Windows: SmartScreen may warn about an unknown publisher -> "More info" -> "Run anyway".
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PACKAGER_VERSION: "0.11.8"
+
+jobs:
+  package:
+    name: Package (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            formats: deb
+          - name: windows-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            formats: nsis
+          - name: macos-arm64
+            os: macos-14
+            target: aarch64-apple-darwin
+            formats: dmg
+          - name: macos-x64
+            os: macos-14
+            target: x86_64-apple-darwin
+            formats: dmg
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libasound2-dev \
+            libgtk-3-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libwayland-dev \
+            libssl-dev
+
+      # Toolchain version + components come from rust-toolchain.toml.
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install
+          rustup target add ${{ matrix.target }}
+          rustc --version
+          cargo --version
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # cargo-packager ships no prebuilt binaries, so build it. rust-cache keeps
+      # ~/.cargo/bin, and `cargo install` is a no-op when this version is cached.
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked --version "${CARGO_PACKAGER_VERSION}"
+
+      # A standalone Packager.toml is not merged with Cargo.toml, so inject the
+      # crate version and the per-target binaries dir here.
+      - name: Sync Packager.toml with Cargo.toml
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          VERSION=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "musickit") | .version')
+          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+            echo "::error::Could not read the musickit version from Cargo.toml"
+            exit 1
+          fi
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${VERSION}"
+            exit 1
+          fi
+          perl -pi.bak -e \
+            "s|^version = \".*\"|version = \"${VERSION}\"|; s|^binariesDir = \".*\"|binariesDir = \"target/${TARGET}/release\"|" \
+            Packager.toml
+          rm -f Packager.toml.bak
+          grep -E '^(version|binariesDir) = ' Packager.toml
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package installer
+        run: cargo packager --release --formats ${{ matrix.formats }} --target ${{ matrix.target }}
+
+      - name: List installers
+        run: ls -la target/packages
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            target/packages/*.deb
+            target/packages/*.exe
+            target/packages/*.dmg
+
+  release:
+    name: Publish GitHub Release
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          path: dist
+          merge-multiple: true
+
+      - name: List files
+        run: ls -la dist
+
+      - name: Create release and upload installers
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          body: |
+            ## Downloads
+            - **Windows**: `MusicKit_*_x64-setup.exe`
+            - **macOS (Apple Silicon)**: `MusicKit_*_aarch64.dmg`
+            - **macOS (Intel)**: `MusicKit_*_x64.dmg`
+            - **Linux (Debian/Ubuntu)**: `musickit_*_amd64.deb` (`sudo apt install ./musickit_*_amd64.deb`)
+
+            These builds are not code-signed.
+            - **macOS**: if the app "is damaged" or "can't be opened", right-click MusicKit.app, choose **Open**, or run
+              `xattr -dr com.apple.quarantine /Applications/MusicKit.app`.
+            - **Windows**: on the SmartScreen prompt, click **More info**, then **Run anyway**.
