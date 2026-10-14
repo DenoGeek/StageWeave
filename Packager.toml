@@ -1,4 +1,4 @@
-# cargo-packager configuration for MusicKit.
+# cargo-packager configuration for StageWeave.
 # Schema: https://github.com/crabnebula-dev/cargo-packager/blob/main/crates/packager/schema.json
 #
 # NOTE: a standalone Packager.toml is NOT merged with Cargo.toml metadata, so
@@ -13,12 +13,12 @@
 
 # `name` must be set explicitly: cargo-packager 0.11 fails to infer it for a
 # standalone Packager.toml (it tries to chdir into the file path).
-name = "musickit"
-productName = "MusicKit"
+name = "stageweave"
+productName = "StageWeave"
 version = "0.1.0"
-identifier = "com.codefamiliar.musickit"
+identifier = "com.codefamiliar.stageweave"
 description = "Stem splitting, mixing and lyric videos for worship teams"
-longDescription = "MusicKit is a desktop toolkit for worship teams: split songs into stems, mix them, and produce lyric videos."
+longDescription = "StageWeave is a desktop toolkit for worship teams: split songs into stems, mix them, and produce lyric videos."
 publisher = "CodeFamiliar"
 authors = ["CodeFamiliar"]
 category = "Music"
@@ -33,7 +33,7 @@ icons = [
 ]
 
 [[binaries]]
-path = "musickit"
+path = "stageweave"
 main = true
 
 [macos]

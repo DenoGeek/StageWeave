@@ -32,11 +32,11 @@ pub mod widgets;
 
 use egui::{Panel, Ui};
 
-use crate::app::{EditorLayout, MusicKitApp, Screen};
+use crate::app::{EditorLayout, StageWeaveApp, Screen};
 use crate::theme;
 use widgets::panel_frame;
 
-pub fn draw(app: &mut MusicKitApp, ui: &mut Ui) {
+pub fn draw(app: &mut StageWeaveApp, ui: &mut Ui) {
     ui.painter().rect_filled(ui.max_rect(), 0.0, theme::BG_APP);
 
     Panel::top("header")
@@ -68,7 +68,7 @@ pub fn draw(app: &mut MusicKitApp, ui: &mut Ui) {
     overlays::toasts(app, ui.ctx());
 }
 
-fn editor_screen(app: &mut MusicKitApp, ui: &mut Ui) {
+fn editor_screen(app: &mut StageWeaveApp, ui: &mut Ui) {
     Panel::right("meters")
         .frame(panel_frame())
         .resizable(false)

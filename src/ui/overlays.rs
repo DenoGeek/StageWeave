@@ -2,19 +2,19 @@
 
 use egui::{Align2, Color32, FontId, Id, Key, Order, Rect, Shape, Stroke, ViewportBuilder, ViewportCommand, ViewportId, vec2};
 
-use crate::app::{MusicKitApp, ToastKind};
+use crate::app::{StageWeaveApp, ToastKind};
 use crate::theme::*;
 
 use super::lyrics_view;
 
 /// The lyric video in its own OS window, so it can be dragged onto a second
 /// display (projector / TV) while the tracks stay on the main screen.
-pub fn lyric_window(app: &mut MusicKitApp, ctx: &egui::Context) {
+pub fn lyric_window(app: &mut StageWeaveApp, ctx: &egui::Context) {
     if !app.lyric_window_open {
         return;
     }
     let title = if app.session.lyrics.title.is_empty() {
-        "MusicKit — Lyric Video".to_owned()
+        "StageWeave — Lyric Video".to_owned()
     } else {
         format!("{} — Lyric Video", app.session.lyrics.title)
     };
@@ -94,7 +94,7 @@ pub fn lyric_window(app: &mut MusicKitApp, ctx: &egui::Context) {
     });
 }
 
-pub fn drop_overlay(app: &MusicKitApp, ctx: &egui::Context) {
+pub fn drop_overlay(app: &StageWeaveApp, ctx: &egui::Context) {
     let hovered: Vec<String> = ctx.input(|i| {
         i.raw
             .hovered_files
@@ -138,7 +138,7 @@ pub fn drop_overlay(app: &MusicKitApp, ctx: &egui::Context) {
     ctx.request_repaint();
 }
 
-pub fn toasts(app: &mut MusicKitApp, ctx: &egui::Context) {
+pub fn toasts(app: &mut StageWeaveApp, ctx: &egui::Context) {
     if app.toasts.is_empty() {
         return;
     }

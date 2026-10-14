@@ -1,11 +1,11 @@
 use egui::{Align, Color32, Layout, Rect, RichText, Stroke, Ui, UiBuilder, pos2, vec2};
 
-use crate::app::MusicKitApp;
+use crate::app::StageWeaveApp;
 use crate::theme::*;
 
 use super::widgets::{Icon, gain_fader, icon_button, play_button};
 
-pub fn draw(app: &mut MusicKitApp, ui: &mut Ui) {
+pub fn draw(app: &mut StageWeaveApp, ui: &mut Ui) {
     let rect = ui.available_rect_before_wrap().shrink2(vec2(14.0, 0.0));
     ui.allocate_rect(rect, egui::Sense::hover());
     let enabled = app.can_play();
@@ -90,7 +90,7 @@ pub fn draw(app: &mut MusicKitApp, ui: &mut Ui) {
 
 /// Cue controls: what's being marked, the loop that's playing (with a clear
 /// way out), or the song's cues to jump into.
-fn cues(app: &mut MusicKitApp, ui: &mut Ui) {
+fn cues(app: &mut StageWeaveApp, ui: &mut Ui) {
     ui.spacing_mut().item_spacing.x = 6.0;
     if let Some(start) = app.cue.recording {
         let pulse = 0.5 + 0.5 * (ui.input(|i| i.time) * 4.0).sin().abs() as f32;
@@ -112,8 +112,13 @@ fn cues(app: &mut MusicKitApp, ui: &mut Ui) {
         if ui.add(exit).on_hover_text("Stop looping, keep playing with the song's mix (Esc)").clicked() {
             app.exit_cue();
         }
-        ui.label(RichText::new(format!("Looping {}", c.name)).size(12.0).color(CUE))
-            .on_hover_text(format!("{} – {}{}", timecode(c.start), timecode(c.end), if c.mix.is_some() { " · own mix" } else { "" }));
+        // Name it only when it fits whole; the timeline header names it too.
+        let text = format!("Looping {}", c.name);
+        let fits = |t: &str| ui.painter().layout_no_wrap(t.to_owned(), egui::FontId::proportional(12.0), CUE).size().x <= ui.available_width();
+        let label = [text.as_str(), c.name.as_str()].into_iter().find(|t| fits(t));
+        if let Some(label) = label {
+            ui.label(RichText::new(label).size(12.0).color(CUE)).on_hover_text(format!("Looping {}: {} – {}{}", c.name, timecode(c.start), timecode(c.end), if c.mix.is_some() { " · own mix" } else { "" }));
+        }
         return;
     }
     if app.session.cues.is_empty() {
@@ -147,10 +152,10 @@ mod tests {
 
     #[test]
     fn exit_cue_button_is_on_the_transport_and_works() {
-        let mut app = MusicKitApp::with_context(&egui::Context::default(), crate::dev::Dev::demo());
+        let mut app = StageWeaveApp::with_context(&egui::Context::default(), crate::dev::Dev::demo());
         app.session.source = app.decoder.load(std::path::Path::new("song.mp3")).ok();
         app.session.cues.push(crate::model::Cue { name: "Cue 1".into(), start: 5.0, end: 9.0, mix: None });
-        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 48.0)).build_ui_state(|ui, app: &mut MusicKitApp| draw(app, ui), app);
+        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 48.0)).build_ui_state(|ui, app: &mut StageWeaveApp| draw(app, ui), app);
         h.run_steps(2);
         h.get_by_label("1").click(); // cue chip
         h.run_steps(2);

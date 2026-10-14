@@ -550,11 +550,11 @@ mod tests {
         assert!((p[0].0 - 1.0).abs() < 0.1 && (p[0].1 - 4.0).abs() < 0.1);
     }
 
-    /// Phrase detection on a real vocals stem: `MUSICKIT_VOCALS=…/vocals.wav cargo test real_vocals -- --ignored --nocapture`
+    /// Phrase detection on a real vocals stem: `STAGEWEAVE_VOCALS=…/vocals.wav cargo test real_vocals -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn real_vocals_phrases() {
-        let path = std::env::var("MUSICKIT_VOCALS").expect("set MUSICKIT_VOCALS");
+        let path = std::env::var("STAGEWEAVE_VOCALS").expect("set STAGEWEAVE_VOCALS");
         let (audio, _) = crate::engine::decode_file_for_tests(std::path::Path::new(&path));
         let peaks = audio.peaks(crate::engine::PEAKS_PER_SEC);
         let phrases = detect_phrases(&peaks, 0.0, audio.duration());

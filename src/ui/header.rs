@@ -1,12 +1,12 @@
 use egui::{Align, Align2, Color32, FontId, Layout, RichText, Sense, Stroke, Ui, vec2};
 
-use crate::app::{EditorLayout, MusicKitApp, Screen};
+use crate::app::{EditorLayout, StageWeaveApp, Screen};
 use crate::engine::python_env::EnvStatus;
 use crate::theme::*;
 
 use super::widgets::{Icon, icon_button};
 
-pub fn draw(app: &mut MusicKitApp, ui: &mut Ui) {
+pub fn draw(app: &mut StageWeaveApp, ui: &mut Ui) {
     ui.horizontal_centered(|ui| {
         logo(ui);
         ui.add_space(6.0);
@@ -49,7 +49,7 @@ pub fn draw(app: &mut MusicKitApp, ui: &mut Ui) {
 }
 
 /// Projects › Sunday 12 Oct › Song title
-fn breadcrumb(app: &mut MusicKitApp, ui: &mut Ui) {
+fn breadcrumb(app: &mut StageWeaveApp, ui: &mut Ui) {
     let crumb = |ui: &mut Ui, text: &str, link: bool| {
         let rt = RichText::new(text).size(12.5).color(if link { TEXT_DIM } else { Color32::WHITE });
         let r = ui.add_sized(
@@ -90,10 +90,10 @@ fn logo(ui: &mut Ui) {
         let x = c.x - 5.0 + i as f32 * 5.0;
         p.line_segment([egui::pos2(x, c.y - h / 2.0), egui::pos2(x, c.y + h / 2.0)], Stroke::new(2.4, Color32::WHITE));
     }
-    ui.label(RichText::new("MusicKit").strong().color(Color32::WHITE).size(13.5));
+    ui.label(RichText::new("StageWeave").strong().color(Color32::WHITE).size(13.5));
 }
 
-fn menus(app: &mut MusicKitApp, ui: &mut Ui) {
+fn menus(app: &mut StageWeaveApp, ui: &mut Ui) {
     egui::MenuBar::new().ui(ui, |ui| {
         ui.menu_button("File", |ui| {
             if ui.button("New Project…").clicked() {
@@ -211,6 +211,10 @@ fn menus(app: &mut MusicKitApp, ui: &mut Ui) {
                 ("Home / End", "Jump to start / end"),
                 ("← / →", "Nudge 5 seconds"),
                 ("L", "Toggle loop"),
+                ("N", "New lyric line at the playhead"),
+                ("E", "Stretch the previous line to the playhead"),
+                ("Q", "Mark a cue start / close it and loop"),
+                ("Esc", "Exit the cue"),
                 ("Enter", "Stamp line (tap sync)"),
                 ("⌘ + scroll", "Zoom timeline"),
                 ("⇧⌘P", "Lyric window"),
@@ -225,7 +229,7 @@ fn menus(app: &mut MusicKitApp, ui: &mut Ui) {
     });
 }
 
-pub fn set_workspace(app: &mut MusicKitApp, ws: EditorLayout) {
+pub fn set_workspace(app: &mut StageWeaveApp, ws: EditorLayout) {
     app.layout = ws;
     match ws {
         EditorLayout::Edit => app.editor_tab = 1,
@@ -238,7 +242,7 @@ pub fn set_workspace(app: &mut MusicKitApp, ws: EditorLayout) {
     }
 }
 
-fn workspace_switcher(app: &mut MusicKitApp, ui: &mut Ui) {
+fn workspace_switcher(app: &mut StageWeaveApp, ui: &mut Ui) {
     let rect = ui.max_rect();
     ui.painter().rect_filled(rect, 6.0, BG_PANEL);
     let items = [(EditorLayout::Edit, "Edit"), (EditorLayout::Lyrics, "Lyrics"), (EditorLayout::Perform, "Perform")];
@@ -267,7 +271,7 @@ fn workspace_switcher(app: &mut MusicKitApp, ui: &mut Ui) {
     }
 }
 
-pub fn status_bar(app: &mut MusicKitApp, ui: &mut Ui) {
+pub fn status_bar(app: &mut StageWeaveApp, ui: &mut Ui) {
     ui.horizontal_centered(|ui| {
         let small = |s: String| RichText::new(s).size(11.0).color(TEXT_FAINT);
         let importing = app.importer.progress.len();

@@ -2,7 +2,7 @@
 
 use egui::{Color32, RichText};
 
-use crate::app::{Dialog, MusicKitApp};
+use crate::app::{Dialog, StageWeaveApp};
 use crate::theme::*;
 
 use super::project_panel::progress_bar;
@@ -29,7 +29,7 @@ fn modal(ctx: &egui::Context, title: &str, add: impl FnOnce(&mut egui::Ui)) -> b
     open
 }
 
-pub fn draw(app: &mut MusicKitApp, ctx: &egui::Context) {
+pub fn draw(app: &mut StageWeaveApp, ctx: &egui::Context) {
     if let Some(job) = &app.archive_job {
         let (f, what) = job.progress.lock().unwrap().clone();
         let _ = modal(ctx, job.title, |ui| {
@@ -90,7 +90,7 @@ pub fn draw(app: &mut MusicKitApp, ctx: &egui::Context) {
             let mut confirm = false;
             keep = modal(ctx, "Delete Project", |ui| {
                 ui.label(RichText::new(format!("Delete \"{name}\"?")).color(Color32::WHITE));
-                ui.label(RichText::new("Its songs, lyrics and mixer settings are removed from MusicKit.").color(TEXT_DIM));
+                ui.label(RichText::new("Its songs, lyrics and mixer settings are removed from StageWeave.").color(TEXT_DIM));
                 ui.add_space(6.0);
                 ui.checkbox(&mut delete_files, "Also delete its song copies and stems from the workspace");
                 ui.add_space(8.0);

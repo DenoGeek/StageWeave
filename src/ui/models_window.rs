@@ -2,7 +2,7 @@
 
 use egui::{Align, Color32, Layout, RichText, Sense, Stroke, Ui, vec2};
 
-use crate::app::MusicKitApp;
+use crate::app::StageWeaveApp;
 use crate::engine::models::{ModelView, Transfer, human_bytes, transfer_label};
 use crate::engine::python_env::EnvStatus;
 use crate::theme::*;
@@ -10,7 +10,7 @@ use crate::theme::*;
 use super::project_panel::progress_bar;
 use super::widgets::section_label;
 
-pub fn draw(app: &mut MusicKitApp, ctx: &egui::Context) {
+pub fn draw(app: &mut StageWeaveApp, ctx: &egui::Context) {
     if !app.show_models {
         return;
     }
@@ -26,7 +26,7 @@ pub fn draw(app: &mut MusicKitApp, ctx: &egui::Context) {
     app.show_models = open;
 }
 
-fn body(app: &mut MusicKitApp, ui: &mut Ui) {
+fn body(app: &mut StageWeaveApp, ui: &mut Ui) {
     let (Some(mm), Some(env)) = (app.model_manager.clone(), app.env.clone()) else {
         ui.label(RichText::new("Demo mode uses a mock engine with no models.").color(TEXT_DIM));
         return;

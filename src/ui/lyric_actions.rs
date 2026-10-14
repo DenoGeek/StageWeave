@@ -3,7 +3,7 @@
 
 use egui::{RichText, Ui};
 
-use crate::app::MusicKitApp;
+use crate::app::StageWeaveApp;
 use crate::theme::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,7 +17,7 @@ pub enum Act {
 }
 
 /// Right-click menu for line `i`. Returns the chosen action.
-pub fn context_menu(app: &MusicKitApp, ui: &mut Ui, i: usize, in_list: bool) -> Option<Act> {
+pub fn context_menu(app: &StageWeaveApp, ui: &mut Ui, i: usize, in_list: bool) -> Option<Act> {
     let line = app.session.lyrics.lines.get(i)?;
     let at = app.lyric_insert_time().map(|t| format!(" (at {})", timecode(t))).unwrap_or_default();
     let mut act = None;
@@ -47,7 +47,7 @@ pub fn context_menu(app: &MusicKitApp, ui: &mut Ui, i: usize, in_list: bool) -> 
 }
 
 /// Apply an action. Inserts from the Timing list open their editor there.
-pub fn apply(app: &mut MusicKitApp, act: Act, in_list: bool) {
+pub fn apply(app: &mut StageWeaveApp, act: Act, in_list: bool) {
     match act {
         Act::Select(i) => app.lyric_clip_select(i),
         Act::Edit(i, list) => {

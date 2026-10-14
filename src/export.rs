@@ -436,11 +436,11 @@ mod tests {
     }
 
     /// Full pipeline with a real ffmpeg and the Clouds starter:
-    /// `MUSICKIT_EXPORT_OUT=/tmp/x cargo test export_end_to_end -- --ignored --nocapture`
+    /// `STAGEWEAVE_EXPORT_OUT=/tmp/x cargo test export_end_to_end -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn export_end_to_end() {
-        let out_dir = PathBuf::from(std::env::var("MUSICKIT_EXPORT_OUT").expect("set MUSICKIT_EXPORT_OUT"));
+        let out_dir = PathBuf::from(std::env::var("STAGEWEAVE_EXPORT_OUT").expect("set STAGEWEAVE_EXPORT_OUT"));
         std::fs::create_dir_all(&out_dir).unwrap();
         let clouds = out_dir.join("Clouds.mp4");
         std::fs::write(&clouds, crate::backgrounds::STARTERS[0].data).unwrap();

@@ -3,7 +3,7 @@
 
 use egui::{Align, Align2, Color32, FontId, Layout, Rect, RichText, Sense, Stroke, Ui, UiBuilder, pos2, vec2};
 
-use crate::app::MusicKitApp;
+use crate::app::StageWeaveApp;
 use crate::theme::*;
 
 use super::lyrics_view;
@@ -12,7 +12,7 @@ use super::widgets::{Icon, icon_button, panel_header};
 const EDIT_BAR_H: f32 = 118.0;
 const EDIT_COLOR: Color32 = Color32::from_rgb(255, 196, 70);
 
-pub fn draw(app: &mut MusicKitApp, ui: &mut Ui) {
+pub fn draw(app: &mut StageWeaveApp, ui: &mut Ui) {
     let generated = app.session.lyrics.is_generated();
     let can_edit = app.session.source.is_some();
     let mut tab = app.monitor_tab;
@@ -117,7 +117,7 @@ fn time_chip(ui: &mut Ui, label: &str, t: f64, color: Color32) {
     ui.label(RichText::new(timecode(t)).monospace().size(13.0).color(color));
 }
 
-fn edit_bar(app: &mut MusicKitApp, ui: &mut Ui) {
+fn edit_bar(app: &mut StageWeaveApp, ui: &mut Ui) {
     let sel = app.lyric_sel();
     let n = app.session.lyrics.lines.len();
     egui::Frame::NONE

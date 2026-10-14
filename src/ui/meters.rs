@@ -1,11 +1,11 @@
 use egui::{Align2, FontId, Rect, Stroke, Ui, pos2, vec2};
 
-use crate::app::MusicKitApp;
+use crate::app::StageWeaveApp;
 use crate::theme::*;
 
 use super::widgets::{HEADER_H, meter_pos, vertical_meter};
 
-pub fn draw(app: &mut MusicKitApp, ui: &mut Ui) {
+pub fn draw(app: &mut StageWeaveApp, ui: &mut Ui) {
     let rect = ui.available_rect_before_wrap();
     ui.allocate_rect(rect, egui::Sense::hover());
     let p = ui.painter();

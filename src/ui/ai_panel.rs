@@ -3,7 +3,7 @@
 use egui::{Align, Align2, Color32, FontId, Layout, Response, RichText, Sense, Stroke, Ui, vec2};
 
 use crate::ai::{LANGUAGES, Provider};
-use crate::app::{AiMethod, AiMode, AiResult, MusicKitApp};
+use crate::app::{AiMethod, AiMode, AiResult, StageWeaveApp};
 use crate::theme::*;
 
 use super::project_panel::{mmss, progress_bar};
@@ -42,7 +42,7 @@ pub fn ai_button(ui: &mut Ui, open: bool, busy: bool) -> Response {
 }
 
 /// The modal dialog. Drawn every frame while `app.ai_panel.open`.
-pub fn dialog(app: &mut MusicKitApp, ctx: &egui::Context) {
+pub fn dialog(app: &mut StageWeaveApp, ctx: &egui::Context) {
     if !app.ai_panel.open {
         return;
     }
@@ -87,7 +87,7 @@ pub fn dialog(app: &mut MusicKitApp, ctx: &egui::Context) {
         });
 }
 
-fn header(app: &mut MusicKitApp, ui: &mut Ui) {
+fn header(app: &mut StageWeaveApp, ui: &mut Ui) {
     let (rect, _) = ui.allocate_exact_size(vec2(WIDTH, 78.0), Sense::hover());
     let p = ui.painter();
     // Soft violet wash.
@@ -122,7 +122,7 @@ fn header(app: &mut MusicKitApp, ui: &mut Ui) {
     }
 }
 
-fn body(app: &mut MusicKitApp, ui: &mut Ui) {
+fn body(app: &mut StageWeaveApp, ui: &mut Ui) {
     // A running job or finished result wins over setup, even if a key was removed meanwhile.
     if app.ai_panel.job.is_some() {
         running(app, ui);
@@ -153,7 +153,7 @@ fn body(app: &mut MusicKitApp, ui: &mut Ui) {
     }
 }
 
-fn mode_switch(app: &mut MusicKitApp, ui: &mut Ui) {
+fn mode_switch(app: &mut StageWeaveApp, ui: &mut Ui) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 52.0), Sense::hover());
     ui.painter().rect_filled(rect, 10.0, BG_INSET);
     let modes = [
@@ -181,7 +181,7 @@ fn mode_switch(app: &mut MusicKitApp, ui: &mut Ui) {
     }
 }
 
-fn no_key_card(app: &mut MusicKitApp, ui: &mut Ui, why: &str) {
+fn no_key_card(app: &mut StageWeaveApp, ui: &mut Ui, why: &str) {
     egui::Frame::NONE.fill(BG_INSET).stroke(Stroke::new(1.0, BORDER)).corner_radius(8).inner_margin(16).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(RichText::new("Connect a transcription service").size(14.0).color(Color32::WHITE));
@@ -203,7 +203,7 @@ fn no_key_card(app: &mut MusicKitApp, ui: &mut Ui, why: &str) {
     });
 }
 
-fn error_box(app: &MusicKitApp, ui: &mut Ui) {
+fn error_box(app: &StageWeaveApp, ui: &mut Ui) {
     if let Some(e) = app.ai_panel.error.clone() {
         ui.add_space(10.0);
         egui::Frame::NONE.fill(DANGER.gamma_multiply(0.12)).corner_radius(6).inner_margin(10).show(ui, |ui| {
@@ -213,7 +213,7 @@ fn error_box(app: &MusicKitApp, ui: &mut Ui) {
     }
 }
 
-fn transcribe_form(app: &mut MusicKitApp, ui: &mut Ui) {
+fn transcribe_form(app: &mut StageWeaveApp, ui: &mut Ui) {
     let configured = app.ai.configured();
     if configured.is_empty() {
         no_key_card(
@@ -234,7 +234,7 @@ fn transcribe_form(app: &mut MusicKitApp, ui: &mut Ui) {
     footnote(app, ui, true);
 }
 
-fn align_form(app: &mut MusicKitApp, ui: &mut Ui) {
+fn align_form(app: &mut StageWeaveApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
         ui.label(RichText::new("Your lyrics").color(TEXT_DIM));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -298,7 +298,7 @@ fn align_form(app: &mut MusicKitApp, ui: &mut Ui) {
     footnote(app, ui, app.ai_panel.align_with_whisper);
 }
 
-fn footnote(app: &MusicKitApp, ui: &mut Ui, uploads: bool) {
+fn footnote(app: &StageWeaveApp, ui: &mut Ui, uploads: bool) {
     ui.add_space(8.0);
     let mut note = if uploads {
         let provider = app.ai.provider().map_or("the provider", Provider::label);
@@ -312,7 +312,7 @@ fn footnote(app: &MusicKitApp, ui: &mut Ui, uploads: bool) {
     ui.label(RichText::new(note).size(11.0).color(TEXT_FAINT));
 }
 
-fn options(app: &mut MusicKitApp, ui: &mut Ui, configured: &[Provider], align: bool) {
+fn options(app: &mut StageWeaveApp, ui: &mut Ui, configured: &[Provider], align: bool) {
     let Some(provider) = app.ai.provider() else { return };
     let frame = if align {
         egui::Frame::NONE
@@ -425,7 +425,7 @@ fn options(app: &mut MusicKitApp, ui: &mut Ui, configured: &[Provider], align: b
     });
 }
 
-fn running(app: &mut MusicKitApp, ui: &mut Ui) {
+fn running(app: &mut StageWeaveApp, ui: &mut Ui) {
     let Some(job) = &app.ai_panel.job else { return };
     let (stage, secs) = (job.stage.clone(), job.started.elapsed().as_secs());
     ui.add_space(24.0);
@@ -450,7 +450,7 @@ fn running(app: &mut MusicKitApp, ui: &mut Ui) {
     });
 }
 
-fn transcript_view(app: &mut MusicKitApp, ui: &mut Ui, t: crate::ai::Transcript) {
+fn transcript_view(app: &mut StageWeaveApp, ui: &mut Ui, t: crate::ai::Transcript) {
     let timed = !t.lines.is_empty();
     ui.horizontal(|ui| {
         let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
@@ -521,7 +521,7 @@ fn transcript_view(app: &mut MusicKitApp, ui: &mut Ui, t: crate::ai::Transcript)
     ui.label(RichText::new("Whisper can mishear words, especially names and non-English lines. Read through the lyrics once.").size(11.0).color(TEXT_FAINT));
 }
 
-fn alignment_view(app: &mut MusicKitApp, ui: &mut Ui, a: crate::align::Alignment) {
+fn alignment_view(app: &mut StageWeaveApp, ui: &mut Ui, a: crate::align::Alignment) {
     use crate::align::{AlignSource, MATCHED};
     let estimated = a.total() - a.matched;
     ui.horizontal(|ui| {

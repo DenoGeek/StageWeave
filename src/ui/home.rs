@@ -2,7 +2,7 @@
 
 use egui::{Align, Align2, Color32, FontId, Layout, Rect, RichText, Sense, Stroke, Ui, pos2, vec2};
 
-use crate::app::{Dialog, MusicKitApp};
+use crate::app::{Dialog, StageWeaveApp};
 use crate::theme::*;
 
 use super::library::{self, short_date};
@@ -18,7 +18,7 @@ pub fn default_project_name() -> String {
     format!("Sunday {} {}", parts.next().unwrap_or(""), parts.next().unwrap_or(""))
 }
 
-pub fn draw(app: &mut MusicKitApp, ui: &mut Ui) {
+pub fn draw(app: &mut StageWeaveApp, ui: &mut Ui) {
     egui::CentralPanel::no_frame().show(ui, |ui| {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             let width = ui.available_width().min(1180.0);
@@ -37,7 +37,7 @@ pub fn draw(app: &mut MusicKitApp, ui: &mut Ui) {
     });
 }
 
-fn header(app: &mut MusicKitApp, ui: &mut Ui) {
+fn header(app: &mut StageWeaveApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
             ui.label(RichText::new("Projects").size(26.0).color(Color32::WHITE));
@@ -51,7 +51,7 @@ fn header(app: &mut MusicKitApp, ui: &mut Ui) {
             if ui.button("Settings").clicked() {
                 app.show_settings = true;
             }
-            if ui.button("Import Project…").on_hover_text("Open a project .zip exported from MusicKit (or drop it here)").clicked() {
+            if ui.button("Import Project…").on_hover_text("Open a project .zip exported from StageWeave (or drop it here)").clicked() {
                 app.import_project_zip(ui.ctx());
             }
             if app.model_manager.is_some() && ui.button("Models").clicked() {
@@ -63,7 +63,7 @@ fn header(app: &mut MusicKitApp, ui: &mut Ui) {
     });
 }
 
-fn missing_workspace(app: &mut MusicKitApp, ui: &mut Ui) {
+fn missing_workspace(app: &mut StageWeaveApp, ui: &mut Ui) {
     egui::Frame::NONE
         .fill(DANGER.gamma_multiply(0.12))
         .stroke(Stroke::new(1.0, DANGER.gamma_multiply(0.6)))
@@ -94,7 +94,7 @@ fn missing_workspace(app: &mut MusicKitApp, ui: &mut Ui) {
 
 const CARD: egui::Vec2 = vec2(270.0, 178.0);
 
-fn grid(app: &mut MusicKitApp, ui: &mut Ui) {
+fn grid(app: &mut StageWeaveApp, ui: &mut Ui) {
     let gap = 16.0;
     let cols = ((ui.available_width() + gap) / (CARD.x + gap)).floor().max(1.0) as usize;
     let projects = app.projects.clone();
@@ -119,7 +119,7 @@ fn grid(app: &mut MusicKitApp, ui: &mut Ui) {
     }
 }
 
-fn new_card(app: &mut MusicKitApp, ui: &mut Ui) {
+fn new_card(app: &mut StageWeaveApp, ui: &mut Ui) {
     let (rect, resp) = ui.allocate_exact_size(CARD, Sense::click());
     let hot = resp.hovered() || ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
     let p = ui.painter();
@@ -136,7 +136,7 @@ fn new_card(app: &mut MusicKitApp, ui: &mut Ui) {
     }
 }
 
-fn project_card(app: &mut MusicKitApp, ui: &mut Ui, project: &crate::store::ProjectRow) {
+fn project_card(app: &mut StageWeaveApp, ui: &mut Ui, project: &crate::store::ProjectRow) {
     let (rect, resp) = ui.allocate_exact_size(CARD, Sense::click());
     let p = ui.painter();
     let hot = resp.hovered();

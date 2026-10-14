@@ -195,7 +195,7 @@ pub struct ArchiveJob {
     done: Arc<std::sync::Mutex<Option<Result<ArchiveDone, String>>>>,
 }
 
-pub struct MusicKitApp {
+pub struct StageWeaveApp {
     pub session: Session,
 
     pub decoder: Arc<dyn AudioDecoder>,
@@ -276,7 +276,7 @@ pub struct MusicKitApp {
     pub dev: crate::dev::Dev,
 }
 
-impl MusicKitApp {
+impl StageWeaveApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         Self::with_context(&cc.egui_ctx, crate::dev::Dev::from_env())
     }
@@ -301,7 +301,7 @@ impl MusicKitApp {
             Arc<Store>,
         ) = if dev.demo {
             let store = open_store(None);
-            store.set_setting(workspace::SETTING_KEY, &std::env::temp_dir().join("musickit-demo").to_string_lossy());
+            store.set_setting(workspace::SETTING_KEY, &std::env::temp_dir().join("stageweave-demo").to_string_lossy());
             (Arc::new(MockDecoder), Arc::new(MockSplitter), None, None, None, store)
         } else {
             let env = PythonEnv::new();
@@ -585,7 +585,7 @@ impl MusicKitApp {
             (tracks, 10f32.powf(self.master_db / 20.0))
         });
         let audio = match &mix {
-            Some(_) => std::env::temp_dir().join(format!("musickit-mix-{}-{}.wav", std::process::id(), song.id)),
+            Some(_) => std::env::temp_dir().join(format!("stageweave-mix-{}-{}.wav", std::process::id(), song.id)),
             None => self.ws.abs(&song.path),
         };
         let background = self.session.lyrics.style.background.file().map(|f| {
@@ -651,7 +651,7 @@ impl MusicKitApp {
         let Some(p) = self.store.project(id) else { return };
         let Some(mut dest) = rfd::FileDialog::new()
             .set_title("Export project")
-            .add_filter("MusicKit project", &["zip"])
+            .add_filter("StageWeave project", &["zip"])
             .set_file_name(format!("{}.zip", workspace::sanitize_file_name(&p.name)))
             .save_file()
         else {
@@ -670,7 +670,7 @@ impl MusicKitApp {
 
     /// Pick a project .zip and add it to the library.
     pub fn import_project_zip(&mut self, ctx: &egui::Context) {
-        let Some(zip) = rfd::FileDialog::new().set_title("Import project").add_filter("MusicKit project", &["zip"]).pick_file() else {
+        let Some(zip) = rfd::FileDialog::new().set_title("Import project").add_filter("StageWeave project", &["zip"]).pick_file() else {
             return;
         };
         self.import_project_from(zip, ctx);
@@ -2291,7 +2291,7 @@ impl MusicKitApp {
     }
 }
 
-impl eframe::App for MusicKitApp {
+impl eframe::App for StageWeaveApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let now = Instant::now();
@@ -2334,8 +2334,8 @@ mod history_tests {
     use crate::model::LyricLine;
     use egui_kittest::Harness;
 
-    fn app() -> MusicKitApp {
-        let mut app = MusicKitApp::with_context(&egui::Context::default(), crate::dev::Dev::demo());
+    fn app() -> StageWeaveApp {
+        let mut app = StageWeaveApp::with_context(&egui::Context::default(), crate::dev::Dev::demo());
         app.session.lyrics.lines = ["A", "B", "C"]
             .iter()
             .enumerate()
@@ -2346,7 +2346,7 @@ mod history_tests {
         app
     }
 
-    fn texts(app: &MusicKitApp) -> Vec<String> {
+    fn texts(app: &StageWeaveApp) -> Vec<String> {
         app.session.lyrics.lines.iter().map(|l| l.text.clone()).collect()
     }
 
@@ -2406,7 +2406,7 @@ mod history_tests {
         let mut a = app();
         a.screen = Screen::Song { project: 0, song: 0 };
         a.lyric_delete_at(0);
-        let mut h = Harness::new_ui_state(|ui, app: &mut MusicKitApp| app.handle_input(ui.ctx()), a);
+        let mut h = Harness::new_ui_state(|ui, app: &mut StageWeaveApp| app.handle_input(ui.ctx()), a);
         h.run_steps(1);
         // ⌘Z on macOS, Ctrl+Z elsewhere (egui's COMMAND).
         h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
@@ -2424,10 +2424,10 @@ mod history_tests {
         assert_eq!(texts(h.state()), ["B", "C"]);
     }
 
-    fn n_harness(a: MusicKitApp) -> Harness<'static, MusicKitApp> {
+    fn n_harness(a: StageWeaveApp) -> Harness<'static, StageWeaveApp> {
         let mut a = a;
         a.screen = Screen::Song { project: 0, song: 0 };
-        let mut h = Harness::new_ui_state(|ui, app: &mut MusicKitApp| app.handle_input(ui.ctx()), a);
+        let mut h = Harness::new_ui_state(|ui, app: &mut StageWeaveApp| app.handle_input(ui.ctx()), a);
         h.run_steps(1);
         h
     }
@@ -2506,7 +2506,7 @@ mod history_tests {
         assert!((a.session.lyrics.lines[0].end - 4.0).abs() < 1e-6);
     }
 
-    fn app_with_stems() -> MusicKitApp {
+    fn app_with_stems() -> StageWeaveApp {
         let mut a = app();
         a.session.tracks = [StemKind::Vocals, StemKind::Drums]
             .into_iter()
@@ -2515,7 +2515,7 @@ mod history_tests {
         a
     }
 
-    fn saved_mixer(a: &MusicKitApp) -> SongMixer {
+    fn saved_mixer(a: &StageWeaveApp) -> SongMixer {
         let json = a.state_json().unwrap();
         let (_, _, _, mixer): (String, String, String, String) = serde_json::from_str(&json).unwrap();
         serde_json::from_str(&mixer).unwrap()

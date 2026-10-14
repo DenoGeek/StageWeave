@@ -1,14 +1,14 @@
-"""MusicKit separation worker.
+"""StageWeave separation worker.
 
-Run by the MusicKit app inside its private Python environment. Speaks a tiny
+Run by the StageWeave app inside its private Python environment. Speaks a tiny
 JSON-lines protocol on stdout; everything else (library logs, warnings) goes
 to stderr.
 
-    python musickit_worker.py env-info
-    python musickit_worker.py status   --models-dir DIR [--remote] MODEL...
-    python musickit_worker.py download --models-dir DIR MODEL
-    python musickit_worker.py delete   --models-dir DIR MODEL
-    python musickit_worker.py separate --engine demucs|uvr --model ID \
+    python stageweave_worker.py env-info
+    python stageweave_worker.py status   --models-dir DIR [--remote] MODEL...
+    python stageweave_worker.py download --models-dir DIR MODEL
+    python stageweave_worker.py delete   --models-dir DIR MODEL
+    python stageweave_worker.py separate --engine demucs|uvr --model ID \
         --input FILE --out DIR [--device auto|cpu|cuda|mps] [--models-dir DIR]
 
 MODEL is written as `engine:id`, e.g. `demucs:htdemucs_6s` or
@@ -68,7 +68,7 @@ def watch_parent():
     threading.Thread(target=run, daemon=True).start()
 
 
-if os.environ.get("MUSICKIT_WATCH_PARENT") == "1":
+if os.environ.get("STAGEWEAVE_WATCH_PARENT") == "1":
     watch_parent()
 
 KNOWN_STEMS = ["vocals", "drums", "bass", "guitar", "piano", "other", "instrumental"]
@@ -174,12 +174,12 @@ def install_tqdm_hook():
     import tqdm
     import tqdm.auto
 
-    if getattr(tqdm.tqdm, "_musickit", False):
+    if getattr(tqdm.tqdm, "_stageweave", False):
         return
     base = tqdm.auto.tqdm
 
     class ReportingTqdm(base):
-        _musickit = True
+        _stageweave = True
 
         def update(self, n=1):
             r = super().update(n)
@@ -560,7 +560,7 @@ def cmd_separate(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(prog="musickit_worker")
+    parser = argparse.ArgumentParser(prog="stageweave_worker")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("env-info")
 

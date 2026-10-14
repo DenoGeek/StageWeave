@@ -2,7 +2,7 @@
 
 use egui::{Color32, RichText, Ui};
 
-use crate::app::MusicKitApp;
+use crate::app::StageWeaveApp;
 use crate::engine::ffmpeg::FfmpegStatus;
 use crate::export::ExportAudio;
 use crate::model::Background;
@@ -11,7 +11,7 @@ use crate::theme::*;
 use super::project_panel::progress_bar;
 use super::widgets::primary_button;
 
-pub fn dialog(app: &mut MusicKitApp, ctx: &egui::Context) {
+pub fn dialog(app: &mut StageWeaveApp, ctx: &egui::Context) {
     if !app.export.open {
         return;
     }
@@ -40,7 +40,7 @@ pub fn dialog(app: &mut MusicKitApp, ctx: &egui::Context) {
     }
 }
 
-fn body(app: &mut MusicKitApp, ui: &mut Ui) {
+fn body(app: &mut StageWeaveApp, ui: &mut Ui) {
     ui.spacing_mut().item_spacing.y = 8.0;
     if let Some(job) = &app.export.job {
         let p = job.progress();
@@ -129,7 +129,7 @@ fn body(app: &mut MusicKitApp, ui: &mut Ui) {
     match &status {
         FfmpegStatus::Missing => {
             ui.label(
-                RichText::new("Exporting needs ffmpeg, the free video encoder. MusicKit will download it once (~30–150 MB).")
+                RichText::new("Exporting needs ffmpeg, the free video encoder. StageWeave will download it once (~30–150 MB).")
                     .size(11.5)
                     .color(TEXT_DIM),
             );

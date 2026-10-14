@@ -1,7 +1,7 @@
 //! SQLite persistence: settings, projects (setlists) and their songs, model
 //! download state and separation history.
 //!
-//! Lives at `<app data>/musickit.db`. Schema changes go through `migrate`,
+//! Lives at `<app data>/stageweave.db`. Schema changes go through `migrate`,
 //! keyed on `PRAGMA user_version`.
 
 use std::path::Path;

@@ -2,20 +2,23 @@
 //!
 //! * `--demo` creates a fake "Sunday Demo" setlist (mock audio, mock splitter)
 //!   so every screen can be explored without real audio. Add
-//!   `MUSICKIT_SCREEN=home|project|song` to choose the start screen; `song`
+//!   `STAGEWEAVE_SCREEN=home|project|song` to choose the start screen; `song`
 //!   opens the first song, splits it, generates lyrics and plays.
-//! * `MUSICKIT_OPEN=song.mp3` adds a file to a "Dev" project and opens it;
-//!   `MUSICKIT_SPLIT=<model id>` then separates it once the engine is ready.
-//! * `MUSICKIT_SHOW_MODELS=1` / `MUSICKIT_SHOW_SETTINGS=1` open those windows at startup.
-//! * `MUSICKIT_INSTALL=1` installs the separation engine if it is missing.
-//! * `MUSICKIT_SCREENSHOT=out.ppm` (+ optional `MUSICKIT_SCREENSHOT_AT=secs`)
+//! * `STAGEWEAVE_OPEN=song.mp3` adds a file to a "Dev" project and opens it;
+//!   `STAGEWEAVE_SPLIT=<model id>` then separates it once the engine is ready.
+//! * `STAGEWEAVE_SHOW_MODELS=1` / `STAGEWEAVE_SHOW_SETTINGS=1` open those windows at startup.
+//! * `STAGEWEAVE_INSTALL=1` installs the separation engine if it is missing.
+//! * `STAGEWEAVE_BG=Clouds` uses a starter background; `STAGEWEAVE_CUE=40,60`
+//!   adds a looping cue with drums muted; `STAGEWEAVE_LAYOUT=lyrics|perform`
+//!   picks the workspace (for README screenshots).
+//! * `STAGEWEAVE_SCREENSHOT=out.ppm` (+ optional `STAGEWEAVE_SCREENSHOT_AT=secs`)
 //!   saves a screenshot of the main window and quits. Used for UI review.
-//!   With `MUSICKIT_SCREENSHOT_AT=stems` it waits until stems are loaded and
+//!   With `STAGEWEAVE_SCREENSHOT_AT=stems` it waits until stems are loaded and
 //!   have played for a few seconds.
 
 use std::path::PathBuf;
 
-use crate::app::MusicKitApp;
+use crate::app::StageWeaveApp;
 
 pub const DEMO_LYRICS: &str = "\
 Ana mipango mema, anakupenda (He has good plans, He loves You)
@@ -62,8 +65,8 @@ impl Dev {
 
     pub fn from_env() -> Self {
         let demo = std::env::args().any(|a| a == "--demo");
-        let screenshot = std::env::var("MUSICKIT_SCREENSHOT").ok().map(|p| {
-            let at = match std::env::var("MUSICKIT_SCREENSHOT_AT").ok().as_deref() {
+        let screenshot = std::env::var("STAGEWEAVE_SCREENSHOT").ok().map(|p| {
+            let at = match std::env::var("STAGEWEAVE_SCREENSHOT_AT").ok().as_deref() {
                 Some("stems") => None,
                 Some(s) => Some(s.parse().unwrap_or(6.0)),
                 None => Some(6.0),
@@ -73,26 +76,26 @@ impl Dev {
         Self {
             demo,
             screenshot,
-            open: std::env::var("MUSICKIT_OPEN").ok().map(PathBuf::from),
-            split_model: std::env::var("MUSICKIT_SPLIT").ok(),
-            install: std::env::var("MUSICKIT_INSTALL").is_ok(),
+            open: std::env::var("STAGEWEAVE_OPEN").ok().map(PathBuf::from),
+            split_model: std::env::var("STAGEWEAVE_SPLIT").ok(),
+            install: std::env::var("STAGEWEAVE_INSTALL").is_ok(),
             ..Default::default()
         }
     }
 }
 
-pub fn start(app: &mut MusicKitApp, ctx: &egui::Context) {
-    if std::env::var("MUSICKIT_SHOW_SETTINGS").is_ok() {
+pub fn start(app: &mut StageWeaveApp, ctx: &egui::Context) {
+    if std::env::var("STAGEWEAVE_SHOW_SETTINGS").is_ok() {
         app.show_settings = true;
     }
-    if std::env::var("MUSICKIT_AI_PANEL").is_ok() {
+    if std::env::var("STAGEWEAVE_AI_PANEL").is_ok() {
         app.ai_panel.open = true;
         app.ai_panel.align_text = DEMO_LYRICS.into();
-        if std::env::var("MUSICKIT_AI_MODE").as_deref() == Ok("align") {
+        if std::env::var("STAGEWEAVE_AI_MODE").as_deref() == Ok("align") {
             app.ai_panel.mode = crate::app::AiMode::Align;
         }
     }
-    if std::env::var("MUSICKIT_SHOW_MODELS").is_ok() {
+    if std::env::var("STAGEWEAVE_SHOW_MODELS").is_ok() {
         app.show_models = true;
     }
     if let Some(path) = app.dev.open.clone() {
@@ -109,8 +112,8 @@ pub fn start(app: &mut MusicKitApp, ctx: &egui::Context) {
         return;
     }
     seed_demo(app);
-    let fake_ai = std::env::var("MUSICKIT_AI_FAKE_RESULT").is_ok();
-    match std::env::var("MUSICKIT_SCREEN").as_deref() {
+    let fake_ai = std::env::var("STAGEWEAVE_AI_FAKE_RESULT").is_ok();
+    match std::env::var("STAGEWEAVE_SCREEN").as_deref() {
         Ok("home") => app.go_home(),
         Ok("song") => {
             if let Some(first) = app.songs.first().map(|s| s.id) {
@@ -133,7 +136,7 @@ pub fn start(app: &mut MusicKitApp, ctx: &egui::Context) {
 }
 
 /// A believable Sunday setlist backed by the mock decoder.
-fn seed_demo(app: &mut MusicKitApp) {
+fn seed_demo(app: &mut StageWeaveApp) {
     use crate::engine::AudioDecoder;
     use crate::store::SongMeta;
     let songs = [
@@ -184,7 +187,7 @@ fn seed_demo(app: &mut MusicKitApp) {
     app.selected_song = app.songs.get(1).map(|s| s.id);
 }
 
-pub fn tick(app: &mut MusicKitApp, ctx: &egui::Context) {
+pub fn tick(app: &mut StageWeaveApp, ctx: &egui::Context) {
     if app.dev.install
         && !app.dev.install_started
         && let Some(env) = &app.env
@@ -196,7 +199,7 @@ pub fn tick(app: &mut MusicKitApp, ctx: &egui::Context) {
         app.dev.install_started = true;
         env.install(ctx.clone());
     }
-    // MUSICKIT_OPEN: open the dev song once it has been imported.
+    // STAGEWEAVE_OPEN: open the dev song once it has been imported.
     if app.dev.open.is_some()
         && app.current_song_id().is_none()
         && let Some(song) = app.songs.iter().find(|s| s.imported).map(|s| s.id)
@@ -223,7 +226,7 @@ pub fn tick(app: &mut MusicKitApp, ctx: &egui::Context) {
         app.generate_lyrics();
         app.seek(52.0);
         app.toggle_play();
-        if std::env::var("MUSICKIT_AI_FAKE_ALIGN").is_ok()
+        if std::env::var("STAGEWEAVE_AI_FAKE_ALIGN").is_ok()
             && let Some(song) = app.current_song_id()
         {
             // Real on-device alignment over the demo's vocal envelope.
@@ -234,19 +237,40 @@ pub fn tick(app: &mut MusicKitApp, ctx: &egui::Context) {
             app.ai_panel.open = true;
             app.toggle_play();
         }
-        if std::env::var("MUSICKIT_LYRIC_LIST").is_ok() {
+        if std::env::var("STAGEWEAVE_LYRIC_LIST").is_ok() {
             app.toggle_play(); // pause
             app.lyric_clip_select(2);
             app.lyric_begin_text_edit(4);
             app.lyric_edit.edit_in_list = true;
             app.editor_tab = 0;
         }
-        if std::env::var("MUSICKIT_LYRIC_TIMELINE").is_ok() {
+        if std::env::var("STAGEWEAVE_LYRIC_TIMELINE").is_ok() {
             app.toggle_play(); // pause
             app.lyric_clip_select(3);
             app.lyric_begin_text_edit(3);
         }
-        if std::env::var("MUSICKIT_LYRIC_EDIT").is_ok() {
+        match std::env::var("STAGEWEAVE_LAYOUT").as_deref() {
+            Ok("lyrics") => (app.layout, app.editor_tab) = (crate::app::EditorLayout::Lyrics, 0),
+            Ok("perform") => app.layout = crate::app::EditorLayout::Perform,
+            _ => {}
+        }
+        if let Ok(title) = std::env::var("STAGEWEAVE_BG")
+            && let Some(s) = crate::backgrounds::STARTERS.iter().find(|s| s.title == title)
+            && crate::backgrounds::ensure_starter(&app.ws.root(), s).is_ok()
+        {
+            app.set_background(crate::backgrounds::background_for(s.file));
+        }
+        if let Some((start, end)) = std::env::var("STAGEWEAVE_CUE").ok().and_then(|v| {
+            let (a, b) = v.split_once(',')?;
+            Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
+        }) {
+            app.session.cues.push(crate::model::Cue { name: "Chorus".into(), start, end, mix: None });
+            app.activate_cue(app.session.cues.len() - 1);
+            if let Some(t) = app.session.tracks.iter_mut().find(|t| t.kind == crate::model::StemKind::Drums) {
+                t.muted = true;
+            }
+        }
+        if std::env::var("STAGEWEAVE_LYRIC_EDIT").is_ok() {
             app.seek(61.0);
             app.toggle_lyric_edit();
         }
@@ -259,7 +283,7 @@ pub fn tick(app: &mut MusicKitApp, ctx: &egui::Context) {
         if !app.is_playing() {
             app.toggle_play();
         }
-        let at = std::env::var("MUSICKIT_SEEK").ok().and_then(|v| v.parse().ok()).unwrap_or(5.0);
+        let at = std::env::var("STAGEWEAVE_SEEK").ok().and_then(|v| v.parse().ok()).unwrap_or(5.0);
         app.seek(at);
     }
     let due = match at {

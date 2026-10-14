@@ -1,6 +1,6 @@
 use egui::{Align, Align2, Color32, FontId, Layout, Rect, RichText, Sense, Shape, Stroke, Ui, pos2, vec2};
 
-use crate::app::{MusicKitApp, SongStatus};
+use crate::app::{StageWeaveApp, SongStatus};
 use crate::engine::queue::JobState;
 use crate::engine::models::{Transfer, human_bytes};
 use crate::engine::python_env::EnvStatus;
@@ -8,7 +8,7 @@ use crate::theme::*;
 
 use super::widgets::{self, Icon, horizontal_meter, icon_button, panel_header, primary_button, section_label};
 
-pub fn draw(app: &mut MusicKitApp, ui: &mut Ui) {
+pub fn draw(app: &mut StageWeaveApp, ui: &mut Ui) {
     ui.set_min_size(ui.available_size());
     let mut tab = app.project_tab;
     panel_header(ui, &["Setlist", "Song"], &mut tab, |ui| {
@@ -51,7 +51,7 @@ pub fn draw(app: &mut MusicKitApp, ui: &mut Ui) {
 }
 
 /// Compact song switcher for the editor.
-fn setlist(app: &mut MusicKitApp, ui: &mut Ui) {
+fn setlist(app: &mut StageWeaveApp, ui: &mut Ui) {
     let current = app.current_song_id();
     let songs = app.songs.clone();
     if let Some(p) = app.current_project() {
@@ -105,7 +105,7 @@ pub fn dashed_rect(painter: &egui::Painter, rect: Rect, color: Color32) {
     painter.extend(Shape::dashed_line(&pts, Stroke::new(1.2, color), 6.0, 4.0));
 }
 
-fn media_card(app: &mut MusicKitApp, ui: &mut Ui) {
+fn media_card(app: &mut StageWeaveApp, ui: &mut Ui) {
     let Some(src) = &app.session.source else { return };
     let info = src.info.clone();
     let peaks = src.peaks.clone();
@@ -181,7 +181,7 @@ fn log_view(ui: &mut Ui, id: &str, lines: &[String]) {
 }
 
 /// Shown until the Python separation engine is ready. Returns true when ready.
-fn engine_card(app: &mut MusicKitApp, ui: &mut Ui) -> bool {
+fn engine_card(app: &mut StageWeaveApp, ui: &mut Ui) -> bool {
     let Some(env) = app.env.clone() else { return true };
     let status = env.status();
     if matches!(status, EnvStatus::Ready(_)) {
@@ -242,7 +242,7 @@ fn engine_card(app: &mut MusicKitApp, ui: &mut Ui) -> bool {
     false
 }
 
-fn separation(app: &mut MusicKitApp, ui: &mut Ui) {
+fn separation(app: &mut StageWeaveApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
         section_label(ui, "Stem separation");
         if app.model_manager.is_some() {
@@ -412,7 +412,7 @@ fn separation(app: &mut MusicKitApp, ui: &mut Ui) {
     }
 }
 
-fn stem_bin(app: &mut MusicKitApp, ui: &mut Ui) {
+fn stem_bin(app: &mut StageWeaveApp, ui: &mut Ui) {
     section_label(ui, &format!("Stems · {}", app.session.tracks.len()));
     let dur = app.session.duration();
     for i in 0..app.session.tracks.len() {

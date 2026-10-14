@@ -5,7 +5,7 @@ use egui::{
     Ui, UiBuilder, pos2, vec2,
 };
 
-use crate::app::MusicKitApp;
+use crate::app::StageWeaveApp;
 use crate::theme::*;
 
 use super::lyric_actions::{self, Act};
@@ -19,7 +19,7 @@ const LYRIC_H: f32 = 40.0;
 const HSCROLL_H: f32 = 12.0;
 const MAX_PX_PER_SEC: f32 = 240.0;
 
-pub fn draw(app: &mut MusicKitApp, ui: &mut Ui) {
+pub fn draw(app: &mut StageWeaveApp, ui: &mut Ui) {
     let mut tab = app.timeline_tab;
     let has_media = app.session.source.is_some();
     let mut zoom_by = None;
@@ -210,7 +210,7 @@ impl Row {
     }
 }
 
-fn rows_for(app: &MusicKitApp) -> Vec<Row> {
+fn rows_for(app: &StageWeaveApp) -> Vec<Row> {
     // Lyrics sit on top, like a caption track, so they never scroll out of view.
     let mut rows = Vec::new();
     if app.session.lyrics.is_generated() {
@@ -266,7 +266,7 @@ fn nice_step(pps: f32) -> (f64, f64) {
     (major, minor)
 }
 
-fn draw_ruler(app: &mut MusicKitApp, ui: &mut Ui, ruler: Rect, corner: Rect, view: &View, duration: f64) {
+fn draw_ruler(app: &mut StageWeaveApp, ui: &mut Ui, ruler: Rect, corner: Rect, view: &View, duration: f64) {
     let resp = ui.interact(ruler, ui.id().with("ruler"), Sense::click_and_drag());
     if (resp.clicked() || resp.dragged())
         && let Some(p) = resp.interact_pointer_pos()
@@ -328,7 +328,7 @@ fn draw_ruler(app: &mut MusicKitApp, ui: &mut Ui, ruler: Rect, corner: Rect, vie
 }
 
 /// Cue loops as bands on the ruler: click to loop one, right-click for options.
-fn draw_cues(app: &mut MusicKitApp, ui: &mut Ui, ruler: Rect, tracks: Rect, view: &View) {
+fn draw_cues(app: &mut StageWeaveApp, ui: &mut Ui, ruler: Rect, tracks: Rect, view: &View) {
     let painter = ui.painter().with_clip_rect(Rect::from_min_max(ruler.min, tracks.max));
     let band_y = (ruler.bottom() - 12.0, ruler.bottom() - 1.0);
     let pos = app.position();
@@ -428,7 +428,7 @@ enum CueAct {
     Delete,
 }
 
-fn draw_hscroll(app: &mut MusicKitApp, ui: &mut Ui, rect: Rect, lane_w: f32, duration: f64) {
+fn draw_hscroll(app: &mut StageWeaveApp, ui: &mut Ui, rect: Rect, lane_w: f32, duration: f64) {
     let p = ui.painter();
     p.rect_filled(rect, 0.0, BG_PANEL);
     let visible = (lane_w / app.timeline.px_per_sec) as f64;
@@ -468,7 +468,7 @@ fn lane_bg(painter: &egui::Painter, row: Rect, lanes_left: f32, alt: bool, selec
 
 #[allow(clippy::too_many_arguments)]
 fn track_row(
-    app: &mut MusicKitApp,
+    app: &mut StageWeaveApp,
     ui: &mut Ui,
     painter: &egui::Painter,
     clip: Rect,
@@ -565,7 +565,7 @@ fn track_row(
     }
 }
 
-fn original_row(app: &mut MusicKitApp, ui: &mut Ui, painter: &egui::Painter, row: Rect, view: &View) {
+fn original_row(app: &mut StageWeaveApp, ui: &mut Ui, painter: &egui::Painter, row: Rect, view: &View) {
     let Some(src) = &app.session.source else { return };
     let lane = lane_bg(painter, row, view.left, false, false);
     let duration = src.info.duration;
@@ -597,7 +597,7 @@ fn original_row(app: &mut MusicKitApp, ui: &mut Ui, painter: &egui::Painter, row
     let _ = ui;
 }
 
-fn lyric_row(app: &mut MusicKitApp, ui: &mut Ui, painter: &egui::Painter, clip: Rect, row: Rect, view: &View) {
+fn lyric_row(app: &mut StageWeaveApp, ui: &mut Ui, painter: &egui::Painter, clip: Rect, row: Rect, view: &View) {
     let lane = lane_bg(painter, row, view.left, true, false);
     let pos = app.position();
     let current = app.session.lyrics.line_at(pos);
@@ -678,7 +678,7 @@ fn lyric_row(app: &mut MusicKitApp, ui: &mut Ui, painter: &egui::Painter, clip: 
 }
 
 /// Text box floating over a lyric clip. Enter saves, Esc cancels, clicking away saves.
-fn inline_editor(app: &mut MusicKitApp, ui: &mut Ui, clip_rect: Rect, lane: Rect) {
+fn inline_editor(app: &mut StageWeaveApp, ui: &mut Ui, clip_rect: Rect, lane: Rect) {
     let Some((line, mut draft)) = app.lyric_edit.editing.clone() else { return };
     let width = clip_rect.width().clamp(380.0, 560.0);
     let x = clip_rect.left().clamp(lane.left(), (lane.right() - width).max(lane.left()));
@@ -735,10 +735,10 @@ mod tests {
 
     #[test]
     fn clicking_a_cue_band_loops_it() {
-        let mut app = MusicKitApp::with_context(&egui::Context::default(), crate::dev::Dev::demo());
+        let mut app = StageWeaveApp::with_context(&egui::Context::default(), crate::dev::Dev::demo());
         app.session.source = app.decoder.load(std::path::Path::new("song.mp3")).ok();
         app.session.cues.push(crate::model::Cue { name: "Cue 1".into(), start: 20.0, end: 60.0, mix: None });
-        let mut h = Harness::builder().with_size(egui::vec2(1200.0, 400.0)).build_ui_state(|ui, app: &mut MusicKitApp| draw(app, ui), app);
+        let mut h = Harness::builder().with_size(egui::vec2(1200.0, 400.0)).build_ui_state(|ui, app: &mut StageWeaveApp| draw(app, ui), app);
         h.run_steps(3);
         h.get_by_label("Timeline Cue 1").click();
         h.run_steps(2);

@@ -1,4 +1,4 @@
-# Release pipeline for MusicKit.
+# Release pipeline for StageWeave.
 #
 # Triggers
 #   - Push a tag matching v* (e.g. `git tag v0.1.0 && git push origin v0.1.0`):
@@ -8,17 +8,17 @@
 #     them as workflow artifacts only (no release is created).
 #
 # Outputs (packaged with cargo-packager, config in Packager.toml)
-#   Linux    musickit_<ver>_amd64.deb          (built on Ubuntu 22.04 -> glibc 2.35+)
-#   Windows  MusicKit_<ver>_x64-setup.exe      (NSIS, per-user install, no admin)
-#   macOS    MusicKit_<ver>_aarch64.dmg        (Apple Silicon)
-#            MusicKit_<ver>_x64.dmg            (Intel, cross-compiled on an arm64 runner;
+#   Linux    stageweave_<ver>_amd64.deb          (built on Ubuntu 22.04 -> glibc 2.35+)
+#   Windows  StageWeave_<ver>_x64-setup.exe      (NSIS, per-user install, no admin)
+#   macOS    StageWeave_<ver>_aarch64.dmg        (Apple Silicon)
+#            StageWeave_<ver>_x64.dmg            (Intel, cross-compiled on an arm64 runner;
 #                                               the macos-13 Intel runner image is retired)
 #
 # Unsigned builds
 #   macOS: the app is not signed or notarized, so Gatekeeper will say it "is damaged"
-#   or "cannot be opened". After dragging MusicKit to Applications, either
-#   right-click MusicKit.app -> Open -> Open, or run:
-#       xattr -dr com.apple.quarantine /Applications/MusicKit.app
+#   or "cannot be opened". After dragging StageWeave to Applications, either
+#   right-click StageWeave.app -> Open -> Open, or run:
+#       xattr -dr com.apple.quarantine /Applications/StageWeave.app
 #   Windows: SmartScreen may warn about an unknown publisher -> "More info" -> "Run anyway".
 
 name: Release
@@ -113,9 +113,9 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           VERSION=$(cargo metadata --no-deps --format-version 1 \
-            | jq -r '.packages[] | select(.name == "musickit") | .version')
+            | jq -r '.packages[] | select(.name == "stageweave") | .version')
           if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
-            echo "::error::Could not read the musickit version from Cargo.toml"
+            echo "::error::Could not read the stageweave version from Cargo.toml"
             exit 1
           fi
           if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
@@ -172,12 +172,12 @@ jobs:
           generate_release_notes: true
           body: |
             ## Downloads
-            - **Windows**: `MusicKit_*_x64-setup.exe`
-            - **macOS (Apple Silicon)**: `MusicKit_*_aarch64.dmg`
-            - **macOS (Intel)**: `MusicKit_*_x64.dmg`
-            - **Linux (Debian/Ubuntu)**: `musickit_*_amd64.deb` (`sudo apt install ./musickit_*_amd64.deb`)
+            - **Windows**: `StageWeave_*_x64-setup.exe`
+            - **macOS (Apple Silicon)**: `StageWeave_*_aarch64.dmg`
+            - **macOS (Intel)**: `StageWeave_*_x64.dmg`
+            - **Linux (Debian/Ubuntu)**: `stageweave_*_amd64.deb` (`sudo apt install ./stageweave_*_amd64.deb`)
 
             These builds are not code-signed.
-            - **macOS**: if the app "is damaged" or "can't be opened", right-click MusicKit.app, choose **Open**, or run
-              `xattr -dr com.apple.quarantine /Applications/MusicKit.app`.
+            - **macOS**: if the app "is damaged" or "can't be opened", right-click StageWeave.app, choose **Open**, or run
+              `xattr -dr com.apple.quarantine /Applications/StageWeave.app`.
             - **Windows**: on the SmartScreen prompt, click **More info**, then **Run anyway**.

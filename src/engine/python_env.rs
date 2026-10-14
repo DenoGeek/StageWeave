@@ -1,12 +1,12 @@
 //! Manages the private Python environment that runs the separation worker.
 //!
-//! Layout (under the OS app-data dir, e.g. `~/Library/Application Support/MusicKit`):
+//! Layout (under the OS app-data dir, e.g. `~/Library/Application Support/com.CodeFamiliar.StageWeave`):
 //! ```text
 //! engine/uv/            uv binary, downloaded if not on PATH
 //! engine/python/        standalone CPython installed by uv
 //! engine/venv/          torch + demucs + audio-separator
 //! engine/models/        model weights (HF / torch hub / UVR)
-//! engine/musickit_worker.py
+//! engine/stageweave_worker.py
 //! engine/engine.json    installed versions
 //! ```
 //! Separated stems are cached under the OS cache dir in `stems/`.
@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-pub const WORKER_SOURCE: &str = include_str!("../../assets/musickit_worker.py");
+pub const WORKER_SOURCE: &str = include_str!("../../assets/stageweave_worker.py");
 
 /// Versions installed into the private environment.
 pub const PYTHON_VERSION: &str = "3.11";
@@ -29,6 +29,72 @@ pub const AUDIO_SEPARATOR: (&str, &str) = ("audio-separator", "0.47.0");
 /// e.g. `audio-separator[cpu]==0.47.0`
 pub fn audio_separator_req(extra: &str) -> String {
     format!("{}[{extra}]=={}", AUDIO_SEPARATOR.0, AUDIO_SEPARATOR.1)
+}
+
+/// The app's data and cache folders. The first call moves data left by the
+/// app's former name (MusicKit) into place.
+pub fn app_dirs() -> (PathBuf, PathBuf) {
+    static DIRS: std::sync::OnceLock<(PathBuf, PathBuf)> = std::sync::OnceLock::new();
+    DIRS.get_or_init(|| {
+        let Some(d) = directories::ProjectDirs::from("com", "CodeFamiliar", "StageWeave") else {
+            return (std::env::temp_dir().join("stageweave"), std::env::temp_dir().join("stageweave-cache"));
+        };
+        let (data, cache) = (d.data_dir().to_path_buf(), d.cache_dir().to_path_buf());
+        if let Some(old) = directories::ProjectDirs::from("com", "CodeFamiliar", "MusicKit") {
+            migrate_legacy(old.data_dir(), &data);
+            if old.cache_dir() != old.data_dir() {
+                migrate_legacy(old.cache_dir(), &cache);
+            }
+        }
+        (data, cache)
+    })
+    .clone()
+}
+
+/// Move a folder from the old app name to the new one, keeping the database
+/// and the Python environment working.
+fn migrate_legacy(old: &Path, new: &Path) {
+    if !old.is_dir() || new.exists() {
+        return;
+    }
+    if let Some(parent) = new.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if std::fs::rename(old, new).is_err() {
+        return;
+    }
+    for ext in ["", "-wal", "-shm"] {
+        let from = new.join(format!("musickit.db{ext}"));
+        if from.exists() {
+            let _ = std::fs::rename(&from, new.join(format!("stageweave.db{ext}")));
+        }
+    }
+    let _ = std::fs::remove_file(new.join("engine").join("musickit_worker.py"));
+    repoint_venv(&new.join("engine").join("venv"), old, new);
+}
+
+/// A venv records absolute paths to its base Python; if that Python lived
+/// under the moved folder, point the venv at its new location.
+fn repoint_venv(venv: &Path, old: &Path, new: &Path) {
+    let cfg = venv.join("pyvenv.cfg");
+    if let Ok(text) = std::fs::read_to_string(&cfg) {
+        let (o, n) = (old.to_string_lossy(), new.to_string_lossy());
+        if text.contains(o.as_ref()) {
+            let _ = std::fs::write(&cfg, text.replace(o.as_ref(), n.as_ref()));
+        }
+    }
+    #[cfg(unix)]
+    if let Ok(entries) = std::fs::read_dir(venv.join("bin")) {
+        for e in entries.flatten() {
+            let link = e.path();
+            if let Ok(target) = std::fs::read_link(&link)
+                && let Ok(rest) = target.strip_prefix(old)
+            {
+                let _ = std::fs::remove_file(&link);
+                let _ = std::os::unix::fs::symlink(new.join(rest), &link);
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -45,18 +111,14 @@ pub struct EnginePaths {
 
 impl EnginePaths {
     pub fn new() -> Self {
-        let dirs = directories::ProjectDirs::from("com", "CodeFamiliar", "MusicKit");
-        let (data, cache) = match &dirs {
-            Some(d) => (d.data_dir().to_path_buf(), d.cache_dir().to_path_buf()),
-            None => (std::env::temp_dir().join("musickit"), std::env::temp_dir().join("musickit-cache")),
-        };
+        let (data, cache) = app_dirs();
         let root = data.join("engine");
         Self {
             uv_dir: root.join("uv"),
             python_dir: root.join("python"),
             venv: root.join("venv"),
             models: root.join("models"),
-            worker: root.join("musickit_worker.py"),
+            worker: root.join("stageweave_worker.py"),
             manifest: root.join("engine.json"),
             stem_cache: cache.join("stems"),
             root,
@@ -64,7 +126,7 @@ impl EnginePaths {
     }
 
     pub fn database(&self) -> PathBuf {
-        self.root.parent().unwrap_or(&self.root).join("musickit.db")
+        self.root.parent().unwrap_or(&self.root).join("stageweave.db")
     }
 
     pub fn python(&self) -> PathBuf {
@@ -493,5 +555,39 @@ mod tests {
     #[test]
     fn extra_goes_before_version() {
         assert_eq!(audio_separator_req("cpu"), "audio-separator[cpu]==0.47.0");
+    }
+
+    #[test]
+    fn legacy_data_moves_to_the_new_name() {
+        let base = std::env::temp_dir().join(format!("sw-migrate-{}", std::process::id()));
+        let (old, new) = (base.join("MusicKit"), base.join("StageWeave"));
+        std::fs::create_dir_all(old.join("engine/python/bin")).unwrap();
+        std::fs::create_dir_all(old.join("engine/venv/bin")).unwrap();
+        std::fs::write(old.join("musickit.db"), "db").unwrap();
+        std::fs::write(old.join("musickit.db-wal"), "wal").unwrap();
+        std::fs::write(old.join("secrets.json"), "{}").unwrap();
+        std::fs::write(old.join("engine/musickit_worker.py"), "").unwrap();
+        std::fs::write(old.join("engine/python/bin/python3.11"), "").unwrap();
+        std::fs::write(old.join("engine/venv/pyvenv.cfg"), format!("home = {}\n", old.join("engine/python/bin").display())).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(old.join("engine/python/bin/python3.11"), old.join("engine/venv/bin/python")).unwrap();
+
+        migrate_legacy(&old, &new);
+
+        assert!(!old.exists());
+        assert_eq!(std::fs::read_to_string(new.join("stageweave.db")).unwrap(), "db");
+        assert_eq!(std::fs::read_to_string(new.join("stageweave.db-wal")).unwrap(), "wal");
+        assert!(new.join("secrets.json").is_file());
+        assert!(!new.join("engine/musickit_worker.py").exists());
+        let cfg = std::fs::read_to_string(new.join("engine/venv/pyvenv.cfg")).unwrap();
+        assert!(cfg.contains(&*new.to_string_lossy()) && !cfg.contains(&*old.to_string_lossy()), "{cfg}");
+        #[cfg(unix)]
+        assert_eq!(std::fs::read_link(new.join("engine/venv/bin/python")).unwrap(), new.join("engine/python/bin/python3.11"));
+
+        // Never clobbers data already under the new name.
+        std::fs::create_dir_all(&old).unwrap();
+        migrate_legacy(&old, &new);
+        assert!(old.exists());
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

@@ -65,7 +65,7 @@ impl Provider {
 
     fn base_url(self) -> String {
         // Dev/testing override (e.g. a local fake server).
-        if let Ok(url) = std::env::var("MUSICKIT_AI_BASE_URL") {
+        if let Ok(url) = std::env::var("STAGEWEAVE_AI_BASE_URL") {
             return url;
         }
         match self {
@@ -135,9 +135,7 @@ pub struct AiSettings {
 
 impl AiSettings {
     pub fn new(store: Arc<Store>) -> Self {
-        let dir = directories::ProjectDirs::from("com", "CodeFamiliar", "MusicKit")
-            .map(|d| d.data_dir().to_path_buf())
-            .unwrap_or_else(|| std::env::temp_dir().join("musickit"));
+        let dir = crate::engine::python_env::app_dirs().0;
         Self::with_path(store, dir.join("secrets.json"))
     }
 
@@ -393,7 +391,7 @@ pub fn test_key(p: Provider, key: &str) -> Result<(), String> {
 }
 
 fn multipart(fields: &[(&str, &str)], wav: &[u8]) -> (String, Vec<u8>) {
-    let boundary = format!("musickit-{:016x}", crate::store::now() as u64 ^ wav.len() as u64 ^ 0x9e37_79b9_7f4a_7c15);
+    let boundary = format!("stageweave-{:016x}", crate::store::now() as u64 ^ wav.len() as u64 ^ 0x9e37_79b9_7f4a_7c15);
     let mut body = Vec::with_capacity(wav.len() + 1024);
     for (name, value) in fields {
         body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n").as_bytes());
@@ -983,11 +981,11 @@ mod tests {
         assert!(s.ends_with(&format!("--{b}--\r\n")));
     }
 
-    /// End-to-end against a server: `MUSICKIT_AI_BASE_URL=… MUSICKIT_AI_KEY=… cargo test live_ -- --ignored`
+    /// End-to-end against a server: `STAGEWEAVE_AI_BASE_URL=… STAGEWEAVE_AI_KEY=… cargo test live_ -- --ignored`
     #[test]
     #[ignore]
     fn live_transcribe() {
-        let key = std::env::var("MUSICKIT_AI_KEY").unwrap_or_default();
+        let key = std::env::var("STAGEWEAVE_AI_KEY").unwrap_or_default();
         let buf = AudioBuffer { sample_rate: 44_100, data: vec![0.1; 44_100 * 2 * 3] };
         let wav = encode_wav_16k_mono(&buf, 0.0, 3.0);
         let r = transcribe_chunk(Provider::Groq, &key, &Provider::Groq.models()[0], "en", "Song lyrics.", true, &wav).unwrap();
@@ -1001,7 +999,7 @@ mod tests {
 
     #[test]
     fn keys_are_saved_privately_and_env_is_a_fallback() {
-        let dir = std::env::temp_dir().join(format!("musickit-secrets-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("stageweave-secrets-{}", std::process::id()));
         let path = dir.join("secrets.json");
         let store = Arc::new(Store::in_memory().unwrap());
         let ai = AiSettings::with_path(store.clone(), path.clone());
@@ -1079,12 +1077,12 @@ mod tests {
         assert_eq!(lines[1].text, "anakupenda sana");
     }
 
-    /// Piece path against a server: `MUSICKIT_AI_BASE_URL=… MUSICKIT_AI_KEY=… cargo test live_pieces -- --ignored --nocapture`
+    /// Piece path against a server: `STAGEWEAVE_AI_BASE_URL=… STAGEWEAVE_AI_KEY=… cargo test live_pieces -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn live_pieces() {
         use crate::chunking::Piece;
-        let key = std::env::var("MUSICKIT_AI_KEY").unwrap_or_default();
+        let key = std::env::var("STAGEWEAVE_AI_KEY").unwrap_or_default();
         let audio = Arc::new(AudioBuffer { sample_rate: 44_100, data: vec![0.1; 44_100 * 2 * 60] });
         let piece = |a: f64, b: f64| Piece { start: a, end: b, phrases: vec![(a + 0.3, b - 0.3)] };
         // Longest piece (20-32) goes first for language detection.

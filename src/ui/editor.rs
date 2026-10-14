@@ -2,14 +2,14 @@
 
 use egui::{Align, Align2, Color32, FontId, Layout, Rect, RichText, Sense, Stroke, Ui, pos2, vec2};
 
-use crate::app::MusicKitApp;
+use crate::app::StageWeaveApp;
 use crate::model::LyricTheme;
 use crate::theme::*;
 
 use super::lyric_actions::{self, Act};
 use super::widgets::{Icon, icon_button, gain_fader, pan_knob, panel_header, primary_button, section_label, toggle_chip};
 
-pub fn draw(app: &mut MusicKitApp, ui: &mut Ui) {
+pub fn draw(app: &mut StageWeaveApp, ui: &mut Ui) {
     ui.set_min_size(ui.available_size());
     let mut tab = app.editor_tab;
     panel_header(ui, &["Lyrics", "Inspector"], &mut tab, |_| {});
@@ -30,7 +30,7 @@ fn field(ui: &mut Ui, label: &str, value: &mut String, hint: &str) {
     });
 }
 
-fn lyrics(app: &mut MusicKitApp, ui: &mut Ui) {
+fn lyrics(app: &mut StageWeaveApp, ui: &mut Ui) {
     if app.session.source.is_none() {
         placeholder(ui, "No song loaded", "Import a song, then paste its lyrics here to build a sing-along video.");
         return;
@@ -133,7 +133,7 @@ fn bg_tile(ui: &mut Ui, selected: bool, thumb: Option<(egui::TextureId, egui::Ve
 }
 
 /// Background: theme gradient, a starter loop, or the user's own image / video.
-fn background_picker(app: &mut MusicKitApp, ui: &mut Ui) {
+fn background_picker(app: &mut StageWeaveApp, ui: &mut Ui) {
     use crate::backgrounds::{self, STARTERS};
     use crate::model::Background;
 
@@ -193,7 +193,7 @@ fn background_picker(app: &mut MusicKitApp, ui: &mut Ui) {
 }
 
 /// One-time ffmpeg download status (needed for video backgrounds and export).
-pub fn ffmpeg_status(app: &MusicKitApp, ui: &mut Ui) {
+pub fn ffmpeg_status(app: &StageWeaveApp, ui: &mut Ui) {
     use crate::engine::ffmpeg::FfmpegStatus;
     match app.ffmpeg.status() {
         FfmpegStatus::Downloading(s) => {
@@ -234,7 +234,7 @@ fn theme_swatch(ui: &mut Ui, current: &mut LyricTheme, theme: LyricTheme) {
     }
 }
 
-fn timing_list(app: &mut MusicKitApp, ui: &mut Ui) {
+fn timing_list(app: &mut StageWeaveApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
         section_label(ui, "Timing");
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -408,7 +408,7 @@ fn parse_timecode(s: &str) -> Option<f64> {
     }
 }
 
-fn inspector(app: &mut MusicKitApp, ui: &mut Ui) {
+fn inspector(app: &mut StageWeaveApp, ui: &mut Ui) {
     let Some(i) = app.selected_track.filter(|&i| i < app.session.tracks.len()) else {
         placeholder(ui, "Nothing selected", "Select a stem in the timeline or project bin to adjust it.");
         return;
@@ -500,8 +500,8 @@ mod tests {
     use crate::model::LyricLine;
     use egui_kittest::{Harness, kittest::Queryable};
 
-    fn app_with_lines() -> MusicKitApp {
-        let mut app = MusicKitApp::with_context(&egui::Context::default(), crate::dev::Dev::demo());
+    fn app_with_lines() -> StageWeaveApp {
+        let mut app = StageWeaveApp::with_context(&egui::Context::default(), crate::dev::Dev::demo());
         app.session.lyrics.lines = ["A", "B", "C"]
             .iter()
             .enumerate()
@@ -512,9 +512,9 @@ mod tests {
         app
     }
 
-    fn harness(app: MusicKitApp) -> Harness<'static, MusicKitApp> {
+    fn harness(app: StageWeaveApp) -> Harness<'static, StageWeaveApp> {
         let mut h = Harness::builder().with_size(egui::vec2(700.0, 500.0)).build_ui_state(
-            |ui, app: &mut MusicKitApp| {
+            |ui, app: &mut StageWeaveApp| {
                 timing_list(app, ui);
             },
             app,
@@ -523,7 +523,7 @@ mod tests {
         h
     }
 
-    fn texts(h: &Harness<'_, MusicKitApp>) -> Vec<String> {
+    fn texts(h: &Harness<'_, StageWeaveApp>) -> Vec<String> {
         h.state().session.lyrics.lines.iter().map(|l| l.text.clone()).collect()
     }
 
@@ -591,7 +591,7 @@ mod tests {
         image::RgbaImage::from_pixel(32, 18, image::Rgba([40, 90, 200, 255])).save(crate::backgrounds::dir(&root).join("Sky.png")).unwrap();
         let app = app_with_lines();
         app.ws.set_root(&root);
-        let mut h = Harness::builder().with_size(egui::vec2(420.0, 300.0)).build_ui_state(|ui, app: &mut MusicKitApp| background_picker(app, ui), app);
+        let mut h = Harness::builder().with_size(egui::vec2(420.0, 300.0)).build_ui_state(|ui, app: &mut StageWeaveApp| background_picker(app, ui), app);
         h.run_steps(2);
         for name in ["Background Theme", "Background Clouds", "Background Flowers", "Background Drapes", "Background + Add"] {
             h.get_by_label(name);
@@ -611,7 +611,7 @@ mod tests {
         let mut app = app_with_lines();
         app.export.open = true;
         app.screen = crate::app::Screen::Song { project: 1, song: 1 };
-        let mut h = Harness::builder().with_size(egui::vec2(800.0, 600.0)).build_ui_state(|ui, app: &mut MusicKitApp| super::super::export_ui::dialog(app, ui.ctx()), app);
+        let mut h = Harness::builder().with_size(egui::vec2(800.0, 600.0)).build_ui_state(|ui, app: &mut StageWeaveApp| super::super::export_ui::dialog(app, ui.ctx()), app);
         h.run_steps(2);
         assert!(h.state().export.open);
         h.get_by_label("720p").click();

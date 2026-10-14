@@ -2,7 +2,7 @@
 //! lyric backgrounds) to one `.zip`, and import it on another machine.
 //!
 //! ```text
-//! musickit-project.json        project + song records
+//! stageweave-project.json      project + song records
 //! songs/<file>                 the song audio
 //! thumbs/<old id>.bin          waveform thumbnails
 //! stems/<slug>-<old id>/<model>/*.wav   (optional)
@@ -22,7 +22,9 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 use crate::store::{SongRow, Store};
 use crate::workspace::{Workspace, join_rel, to_rel, unique_path};
 
-pub const MANIFEST: &str = "musickit-project.json";
+pub const MANIFEST: &str = "stageweave-project.json";
+/// Manifest name used before the app was renamed; still imported.
+const LEGACY_MANIFEST: &str = "musickit-project.json";
 pub const FORMAT: u64 = 1;
 /// Lyric backgrounds shared by all projects: `<workspace>/Backgrounds/`.
 pub const BACKGROUNDS_DIR: &str = "Backgrounds";
@@ -251,13 +253,14 @@ pub fn import_project(store: &Store, ws: &Workspace, zip_path: &Path, progress: 
     }
 
     let manifest: Value = {
-        let mut f = zip.by_name(MANIFEST).map_err(|_| "This zip isn't a MusicKit project (no musickit-project.json)")?;
+        let entry = if zip.index_for_name(MANIFEST).is_some() { MANIFEST } else { LEGACY_MANIFEST };
+        let mut f = zip.by_name(entry).map_err(|_| "This zip isn't a StageWeave project (no stageweave-project.json)")?;
         let mut s = String::new();
         f.read_to_string(&mut s).map_err(|e| e.to_string())?;
         serde_json::from_str(&s).map_err(|e| format!("Broken project file: {e}"))?
     };
     if manifest["format"].as_u64().unwrap_or(0) > FORMAT {
-        return Err("This project was exported by a newer MusicKit. Update the app to import it.".into());
+        return Err("This project was exported by a newer StageWeave. Update the app to import it.".into());
     }
     let name = manifest["project"]["name"].as_str().unwrap_or("Imported Project").to_owned();
     let default_model = manifest["project"]["default_model"].as_str().unwrap_or("demucs:htdemucs").to_owned();
@@ -436,7 +439,7 @@ mod tests {
     fn env(tag: &str) -> Env {
         static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!("musickit-archive-{tag}-{}-{n}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("stageweave-archive-{tag}-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let store = Arc::new(Store::in_memory().unwrap());
@@ -607,6 +610,20 @@ mod tests {
         assert!(import_project(&b.store, &b.ws, &zip_path, &|_, _| {}).is_err());
         assert!(b.store.list_projects().is_empty());
         assert!(!b.ws.abs("Broken").exists());
+    }
+
+    #[test]
+    fn zips_from_before_the_rename_still_import() {
+        let b = env("i");
+        let zip_path = b.dir.join("old.zip");
+        {
+            let mut z = ZipWriter::new(File::create(&zip_path).unwrap());
+            z.start_file(LEGACY_MANIFEST, SimpleFileOptions::default()).unwrap();
+            z.write_all(br#"{"format":1,"project":{"name":"Old","default_model":"demucs:htdemucs"},"songs":[]}"#).unwrap();
+            z.finish().unwrap();
+        }
+        let id = import_project(&b.store, &b.ws, &zip_path, &|_, _| {}).unwrap();
+        assert_eq!(b.store.project(id).unwrap().name, "Old");
     }
 
     #[test]

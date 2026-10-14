@@ -140,7 +140,7 @@ pub fn paint(painter: &Painter, rect: Rect, lyrics: &Lyrics, t: f64, duration: f
 
     if lyrics.lines.is_empty() {
         // No lyrics for this song: hold on a title card.
-        let title = if lyrics.title.is_empty() { "MusicKit" } else { &lyrics.title };
+        let title = if lyrics.title.is_empty() { "StageWeave" } else { &lyrics.title };
         let g = centered_galley(&painter, title, h * 0.1, Color32::WHITE, wrap);
         let y = rect.center().y - g.size().y * 0.6;
         painter.galley(pos2(rect.center().x, y), g.clone(), Color32::WHITE);

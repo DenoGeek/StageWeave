@@ -192,11 +192,11 @@ mod tests {
 mod real_audio {
     use super::*;
 
-    /// `MUSICKIT_VOCALS=…/vocals.wav cargo test real_vocals_pieces -- --ignored --nocapture`
+    /// `STAGEWEAVE_VOCALS=…/vocals.wav cargo test real_vocals_pieces -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn real_vocals_pieces() {
-        let path = std::env::var("MUSICKIT_VOCALS").expect("set MUSICKIT_VOCALS");
+        let path = std::env::var("STAGEWEAVE_VOCALS").expect("set STAGEWEAVE_VOCALS");
         let (audio, _) = crate::engine::decode_file_for_tests(std::path::Path::new(&path));
         let peaks = audio.peaks(crate::engine::PEAKS_PER_SEC);
         let pieces = build_pieces(&peaks, audio.duration());

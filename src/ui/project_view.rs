@@ -2,7 +2,7 @@
 
 use egui::{Align, Align2, Color32, FontId, Id, Layout, Panel, Rect, RichText, Sense, Stroke, Ui, pos2, vec2};
 
-use crate::app::{Dialog, MusicKitApp, SongStatus};
+use crate::app::{Dialog, StageWeaveApp, SongStatus};
 use crate::store::{SongMeta, SongRow};
 use crate::theme::*;
 
@@ -11,7 +11,7 @@ use super::widgets::{Icon, icon_button, panel_frame, primary_button, section_lab
 
 const ROW_H: f32 = 62.0;
 
-pub fn draw(app: &mut MusicKitApp, ui: &mut Ui) {
+pub fn draw(app: &mut StageWeaveApp, ui: &mut Ui) {
     let Some(project) = app.current_project().cloned() else {
         app.go_home();
         return;
@@ -43,7 +43,7 @@ pub fn draw(app: &mut MusicKitApp, ui: &mut Ui) {
     });
 }
 
-fn top_bar(app: &mut MusicKitApp, ui: &mut Ui, project: &crate::store::ProjectRow, statuses: &[SongStatus]) {
+fn top_bar(app: &mut StageWeaveApp, ui: &mut Ui, project: &crate::store::ProjectRow, statuses: &[SongStatus]) {
     ui.horizontal(|ui| {
         if ui.add(egui::Button::new(RichText::new("‹  Projects").color(TEXT_DIM)).frame(false)).clicked() {
             app.go_home();
@@ -102,11 +102,11 @@ fn top_bar(app: &mut MusicKitApp, ui: &mut Ui, project: &crate::store::ProjectRo
     });
 }
 
-fn app_ready(app: &MusicKitApp) -> bool {
+fn app_ready(app: &StageWeaveApp) -> bool {
     app.env.as_ref().is_none_or(|e| e.info().is_some())
 }
 
-fn empty_state(app: &mut MusicKitApp, ui: &mut Ui) {
+fn empty_state(app: &mut StageWeaveApp, ui: &mut Ui) {
     let rect = ui.max_rect().shrink(40.0);
     let resp = ui.interact(rect, Id::new("project_empty"), Sense::click());
     let hot = resp.hovered() || ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
@@ -134,7 +134,7 @@ struct DragState {
     grab_offset: f32,
 }
 
-fn song_list(app: &mut MusicKitApp, ui: &mut Ui, songs: &[SongRow], statuses: &[SongStatus]) {
+fn song_list(app: &mut StageWeaveApp, ui: &mut Ui, songs: &[SongRow], statuses: &[SongStatus]) {
     // Column header.
     let (hdr, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
     let hp = ui.painter();
@@ -366,7 +366,7 @@ fn meta_of(song: &SongRow) -> SongMeta {
     }
 }
 
-fn details(app: &mut MusicKitApp, ui: &mut Ui) {
+fn details(app: &mut StageWeaveApp, ui: &mut Ui) {
     ui.set_min_size(ui.available_size());
     let Some(song) = app.selected_song.and_then(|id| app.songs.iter().find(|s| s.id == id).cloned()) else {
         ui.add_space(40.0);

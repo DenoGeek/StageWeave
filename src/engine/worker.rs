@@ -81,7 +81,7 @@ pub fn run(
     let mut cmd = env.worker_command().map_err(err)?;
     // The worker exits when this pipe closes, so it never outlives the app.
     cmd.args(args)
-        .env("MUSICKIT_WATCH_PARENT", "1")
+        .env("STAGEWEAVE_WATCH_PARENT", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

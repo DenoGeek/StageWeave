@@ -135,7 +135,7 @@ pub fn default_dir() -> PathBuf {
     directories::UserDirs::new()
         .and_then(|u| u.audio_dir().map(Path::to_path_buf).or_else(|| Some(u.home_dir().join("Music"))))
         .unwrap_or_else(std::env::temp_dir)
-        .join("MusicKit")
+        .join("StageWeave")
 }
 
 pub fn join_rel(root: &Path, rel: &str) -> PathBuf {
@@ -430,7 +430,7 @@ mod tests {
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("musickit-test-{name}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("stageweave-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d

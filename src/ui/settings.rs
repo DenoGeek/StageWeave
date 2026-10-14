@@ -5,13 +5,13 @@ use std::time::Instant;
 
 use egui::{Color32, RichText, Ui};
 
-use crate::app::{MusicKitApp, ToastKind};
+use crate::app::{StageWeaveApp, ToastKind};
 use crate::engine::python_env::{DevicePref, EnvStatus};
 use crate::theme::*;
 
 use super::widgets::section_label;
 
-pub fn draw(app: &mut MusicKitApp, ctx: &egui::Context) {
+pub fn draw(app: &mut StageWeaveApp, ctx: &egui::Context) {
     if !app.show_settings {
         return;
     }
@@ -26,7 +26,7 @@ pub fn draw(app: &mut MusicKitApp, ctx: &egui::Context) {
     app.show_settings = open;
 }
 
-fn body(app: &mut MusicKitApp, ui: &mut Ui) {
+fn body(app: &mut StageWeaveApp, ui: &mut Ui) {
     ui.set_width(460.0);
 
     section_label(ui, "Workspace");
@@ -149,11 +149,11 @@ fn body(app: &mut MusicKitApp, ui: &mut Ui) {
 }
 
 /// API keys (private app-data file, or environment) for Whisper transcription.
-fn ai_section(app: &mut MusicKitApp, ui: &mut Ui) {
+fn ai_section(app: &mut StageWeaveApp, ui: &mut Ui) {
     use crate::ai::Provider;
     section_label(ui, "AI · lyric transcription");
     ui.label(
-        RichText::new("Add a key for either service to transcribe lyrics with Whisper. Keys are kept in a private file in MusicKit's app-data folder (only your user account can read it).")
+        RichText::new("Add a key for either service to transcribe lyrics with Whisper. Keys are kept in a private file in StageWeave's app-data folder (only your user account can read it).")
             .size(11.5)
             .color(TEXT_DIM),
     );
@@ -308,7 +308,7 @@ pub fn reveal(path: &Path) {
     let _ = crate::engine::python_env::background_command(program).arg(path).spawn();
 }
 
-pub fn error_details(app: &mut MusicKitApp, ctx: &egui::Context) {
+pub fn error_details(app: &mut StageWeaveApp, ctx: &egui::Context) {
     let Some(lines) = app.error_details.clone() else { return };
     let mut open = true;
     egui::Window::new("Separation error")

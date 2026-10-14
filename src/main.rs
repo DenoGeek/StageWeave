@@ -19,11 +19,11 @@ mod workspace;
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("MusicKit")
+            .with_title("StageWeave")
             .with_inner_size([1480.0, 920.0])
             .with_min_inner_size([1100.0, 680.0])
             .with_drag_and_drop(true),
         ..Default::default()
     };
-    eframe::run_native("MusicKit", options, Box::new(|cc| Ok(Box::new(app::MusicKitApp::new(cc)))))
+    eframe::run_native("StageWeave", options, Box::new(|cc| Ok(Box::new(app::StageWeaveApp::new(cc)))))
 }
