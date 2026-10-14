@@ -46,7 +46,7 @@ Download the latest build from the [Releases](../../releases) page:
 | Windows | `StageWeave_<version>_x64-setup.exe` |
 | Debian / Ubuntu | `stageweave_<version>_amd64.deb` (`sudo apt install ./stageweave_*_amd64.deb`) |
 
-The macOS builds aren't notarized. If macOS says the app "is damaged" or "can't be opened", right-click StageWeave.app and choose **Open**, or run:
+The macOS builds aren't notarized yet. Drag StageWeave from the DMG into **Applications**, then, if macOS says the app "is damaged" or "can't be opened", run this in Terminal and open it again:
 
 ```sh
 xattr -dr com.apple.quarantine /Applications/StageWeave.app

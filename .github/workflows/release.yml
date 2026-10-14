@@ -178,6 +178,9 @@ jobs:
             - **Linux (Debian/Ubuntu)**: `stageweave_*_amd64.deb` (`sudo apt install ./stageweave_*_amd64.deb`)
 
             These builds are not code-signed.
-            - **macOS**: if the app "is damaged" or "can't be opened", right-click StageWeave.app, choose **Open**, or run
-              `xattr -dr com.apple.quarantine /Applications/StageWeave.app`.
+            - **macOS**: drag StageWeave into **Applications** first. If it then says the app "is damaged" or "can't be opened", run this in Terminal:
+
+              ```sh
+              xattr -dr com.apple.quarantine /Applications/StageWeave.app
+              ```
             - **Windows**: on the SmartScreen prompt, click **More info**, then **Run anyway**.
