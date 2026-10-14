@@ -25,6 +25,7 @@ mod monitor;
 mod overlays;
 mod project_panel;
 mod project_view;
+pub mod search;
 mod settings;
 mod timeline;
 mod transport;
@@ -60,11 +61,13 @@ pub fn draw(app: &mut StageWeaveApp, ui: &mut Ui) {
     dialogs::draw(app, ui.ctx());
     ai_panel::dialog(app, ui.ctx());
     export_ui::dialog(app, ui.ctx());
+    search::library_picker(app, ui.ctx());
     settings::draw(app, ui.ctx());
     models_window::draw(app, ui.ctx());
     settings::error_details(app, ui.ctx());
     overlays::lyric_window(app, ui.ctx());
     overlays::drop_overlay(app, ui.ctx());
+    search::palette(app, ui.ctx());
     overlays::toasts(app, ui.ctx());
 }
 

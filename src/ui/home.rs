@@ -26,12 +26,20 @@ pub fn draw(app: &mut StageWeaveApp, ui: &mut Ui) {
             egui::Frame::NONE.inner_margin(egui::Margin::symmetric(margin as i8, 28)).show(ui, |ui| {
                 ui.set_width(width - 48.0);
                 header(app, ui);
-                ui.add_space(18.0);
+                ui.add_space(14.0);
+                if !app.projects.is_empty() {
+                    super::search::search_field(ui, &mut app.home_query, "Filter projects, or find a song in any setlist…", 420.0);
+                    ui.add_space(14.0);
+                }
                 if !app.ws.exists() && !app.projects.is_empty() {
                     missing_workspace(app, ui);
                     ui.add_space(14.0);
                 }
-                grid(app, ui);
+                if app.home_query.trim().is_empty() {
+                    grid(app, ui, None);
+                } else {
+                    search_results(app, ui);
+                }
             });
         });
     });
@@ -94,24 +102,59 @@ fn missing_workspace(app: &mut StageWeaveApp, ui: &mut Ui) {
 
 const CARD: egui::Vec2 = vec2(270.0, 178.0);
 
-fn grid(app: &mut StageWeaveApp, ui: &mut Ui) {
+/// Typing in the home search: matching projects, then songs from every setlist.
+fn search_results(app: &mut StageWeaveApp, ui: &mut Ui) {
+    let query = app.home_query.clone();
+    let songs = app.song_index();
+    let projects = crate::song_library::search_projects(&app.projects, &songs, &query);
+    let hits = crate::song_library::search(&songs, &app.projects, &query, false);
+    if projects.is_empty() && hits.is_empty() {
+        ui.add_space(20.0);
+        ui.label(RichText::new(format!("No projects or songs match “{}”", query.trim())).color(TEXT_DIM));
+        return;
+    }
+    if !projects.is_empty() {
+        grid(app, ui, Some(projects));
+    }
+    if !hits.is_empty() {
+        ui.label(RichText::new(format!("SONGS ({})", hits.len())).size(10.5).strong().color(TEXT_FAINT));
+        ui.add_space(4.0);
+        let ctx = ui.ctx().clone();
+        egui::Frame::NONE.fill(BG_PANEL).corner_radius(8).inner_margin(6).show(ui, |ui| {
+            for h in hits.iter().take(100) {
+                let stems = app.song_split_stems(&h.song);
+                if super::search::song_row(ui, h, stems, false, None).on_hover_text("Open this song").clicked() {
+                    app.open_song_anywhere(h.song.project_id, h.song.id, &ctx);
+                }
+            }
+        });
+    }
+}
+
+/// Project cards (`only`: a search's matches, without the "New Project" card).
+fn grid(app: &mut StageWeaveApp, ui: &mut Ui, only: Option<Vec<crate::store::ProjectRow>>) {
     let gap = 16.0;
     let cols = ((ui.available_width() + gap) / (CARD.x + gap)).floor().max(1.0) as usize;
-    let projects = app.projects.clone();
-    let total = projects.len() + 1;
+    let searching = only.is_some();
+    let projects = only.unwrap_or_else(|| app.projects.clone());
+    let skip = if searching { 0 } else { 1 };
+    let total = projects.len() + skip;
     for row in 0..total.div_ceil(cols) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
             for col in 0..cols {
                 let i = row * cols + col;
-                if i == 0 {
+                if i == 0 && !searching {
                     new_card(app, ui);
-                } else if let Some(p) = projects.get(i - 1) {
+                } else if let Some(p) = projects.get(i - skip) {
                     project_card(app, ui, p);
                 }
             }
         });
         ui.add_space(gap);
+    }
+    if searching {
+        return;
     }
     if projects.is_empty() {
         ui.add_space(8.0);

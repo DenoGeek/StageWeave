@@ -37,6 +37,13 @@ pub fn draw(app: &mut StageWeaveApp, ui: &mut Ui) {
             if songs.is_empty() {
                 empty_state(app, ui);
             } else {
+                ui.horizontal(|ui| {
+                    super::search::search_field(ui, &mut app.setlist_query, "Filter this setlist…", 300.0);
+                    if !app.setlist_query.trim().is_empty() {
+                        ui.label(RichText::new("Reordering is off while filtering").size(11.0).color(TEXT_FAINT));
+                    }
+                });
+                ui.add_space(6.0);
                 song_list(app, ui, &songs, &statuses);
             }
         });
@@ -75,6 +82,9 @@ fn top_bar(app: &mut StageWeaveApp, ui: &mut Ui, project: &crate::store::Project
             }
             if busy > 0 && ui.button(format!("Cancel All ({busy})")).clicked() {
                 app.queue.cancel_all();
+            }
+            if ui.button("Add from Library…").on_hover_text("Reuse songs from your other setlists, already split and with lyrics").clicked() {
+                super::search::open_library(app);
             }
             if ui.button("Add Songs…").clicked() {
                 app.add_songs_dialog();
@@ -116,6 +126,7 @@ fn empty_state(app: &mut StageWeaveApp, ui: &mut Ui) {
     library::paint_glyph(p, rect.center() - vec2(0.0, 40.0), if hot { ACCENT_BRIGHT } else { TEXT_FAINT });
     library::centered_text(p, rect.center() + vec2(0.0, 10.0), "Add this week's songs", 17.0, Color32::WHITE);
     library::centered_text(p, rect.center() + vec2(0.0, 34.0), "Drop audio files or a folder here, or click to browse", 12.0, TEXT_DIM);
+    library::centered_text(p, rect.center() + vec2(0.0, 78.0), "Already prepared a song for another service? Use Add from Library (top right).", 11.0, TEXT_FAINT);
     library::centered_text(
         p,
         rect.center() + vec2(0.0, 56.0),
@@ -153,7 +164,15 @@ fn song_list(app: &mut StageWeaveApp, ui: &mut Ui, songs: &[SongRow], statuses: 
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         let top = ui.cursor().top();
         let mut drop_index = None;
+        let terms = crate::song_library::terms(&app.setlist_query);
+        let filtering = !terms.is_empty();
+        let mut shown = 0;
         for (i, song) in songs.iter().enumerate() {
+            let haystack = format!("{} {} {} {} {}", song.title, song.artist, song.song_key, song.notes, song.lyrics_raw);
+            if filtering && !crate::song_library::matches_all(&terms, &haystack) {
+                continue;
+            }
+            shown += 1;
             let status = &statuses[i];
             let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
             let selected = app.selected_song == Some(song.id);
@@ -184,6 +203,7 @@ fn song_list(app: &mut StageWeaveApp, ui: &mut Ui, songs: &[SongRow], statuses: 
                 }
             }
             if hresp.drag_started()
+                && !filtering
                 && let Some(ptr) = pointer
             {
                 drag = Some(DragState { song: song.id, grab_offset: ptr.y - rect.top() });
@@ -293,6 +313,10 @@ fn song_list(app: &mut StageWeaveApp, ui: &mut Ui, songs: &[SongRow], statuses: 
             }
         }
 
+        if filtering && shown == 0 {
+            ui.add_space(16.0);
+            ui.label(RichText::new(format!("No songs in this setlist match “{}”. Press ⌘K to search every setlist.", app.setlist_query.trim())).color(TEXT_DIM));
+        }
         // Insertion line + ghost while dragging.
         if let (Some(d), Some(ptr)) = (drag, pointer) {
             let idx = drop_index.unwrap_or(if ptr.y < top { 0 } else { songs.len() });

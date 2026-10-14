@@ -49,6 +49,12 @@ fn lyrics(app: &mut StageWeaveApp, ui: &mut Ui) {
             if super::ai_panel::ai_button(ui, app.ai_panel.open, app.ai_panel.job.is_some()).clicked() {
                 app.open_ai_dialog();
             }
+            let tip = "Import lyrics from a file (or drop it on the window):\n\
+                       • Synced: LRC, SRT, WebVTT (timing kept)\n\
+                       • ChordPro, OpenLyrics / OpenLP, OpenSong, plain text (chords and section labels removed)";
+            if ui.button(RichText::new("Import…").size(11.5)).on_hover_text(tip).clicked() {
+                app.import_lyrics_dialog();
+            }
         });
     });
     let l = &mut app.session.lyrics;

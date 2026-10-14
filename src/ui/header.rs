@@ -17,18 +17,22 @@ pub fn draw(app: &mut StageWeaveApp, ui: &mut Ui) {
         breadcrumb(app, ui);
 
         let in_song = matches!(app.screen, Screen::Song { .. });
-        if !in_song {
-            return;
+        if in_song {
+            // Centered workspace switcher.
+            let full = ui.max_rect();
+            let switch_w = 270.0;
+            let rect = egui::Rect::from_center_size(full.center(), vec2(switch_w, 26.0));
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(Layout::left_to_right(Align::Center)));
+            workspace_switcher(app, &mut child);
         }
 
-        // Centered workspace switcher.
-        let full = ui.max_rect();
-        let switch_w = 270.0;
-        let rect = egui::Rect::from_center_size(full.center(), vec2(switch_w, 26.0));
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(Layout::left_to_right(Align::Center)));
-        workspace_switcher(app, &mut child);
-
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if search_button(ui).clicked() {
+                app.search.open = true;
+            }
+            if !in_song {
+                return;
+            }
             let can_pop = app.session.lyrics.is_generated();
             let r = icon_button(
                 ui,
@@ -80,6 +84,21 @@ fn breadcrumb(app: &mut StageWeaveApp, ui: &mut Ui) {
     }
 }
 
+/// "Search  ⌘K" pill that opens the global search.
+fn search_button(ui: &mut Ui) -> egui::Response {
+    let keys = if cfg!(target_os = "macos") { "⌘K" } else { "Ctrl+K" };
+    let (rect, resp) = ui.allocate_exact_size(vec2(150.0, 24.0), Sense::click());
+    let resp = resp.on_hover_text("Search all projects, songs and lyrics");
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Search"));
+    let p = ui.painter();
+    p.rect_filled(rect, 6.0, if resp.hovered() { BG_WIDGET } else { BG_INSET });
+    p.rect_stroke(rect, 6.0, Stroke::new(1.0, BORDER), egui::StrokeKind::Inside);
+    super::widgets::paint_icon(p, egui::Rect::from_center_size(rect.left_center() + vec2(14.0, 0.0), vec2(13.0, 13.0)), Icon::Search, TEXT_FAINT);
+    p.text(rect.left_center() + vec2(28.0, 0.0), Align2::LEFT_CENTER, "Search", FontId::proportional(12.0), TEXT_DIM);
+    p.text(rect.right_center() - vec2(8.0, 0.0), Align2::RIGHT_CENTER, keys, FontId::proportional(10.5), TEXT_FAINT);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 fn logo(ui: &mut Ui) {
     let (rect, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
     let p = ui.painter();
@@ -103,10 +122,17 @@ fn menus(app: &mut StageWeaveApp, ui: &mut Ui) {
                 if ui.add(egui::Button::new("Add Songs…").shortcut_text("⌘O")).clicked() {
                     app.add_songs_dialog();
                 }
+                if ui.button("Add from Library…").clicked() {
+                    super::search::open_library(app);
+                }
                 if ui.button("Close Project").clicked() {
                     app.go_home();
                 }
             });
+            if ui.add(egui::Button::new("Search…").shortcut_text(if cfg!(target_os = "macos") { "⌘K" } else { "Ctrl+K" })).clicked() {
+                app.search.open = true;
+            }
+            ui.separator();
             if ui.button("Import Project…").clicked() {
                 app.import_project_zip(ui.ctx());
             }

@@ -112,6 +112,7 @@ pub enum Icon {
     ZoomOut,
     Follow,
     Sparkle,
+    Search,
 }
 
 pub fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
@@ -223,6 +224,13 @@ pub fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color3
             painter.add(star(c + vec2(-0.15 * s, 0.15 * s), 0.8 * s));
             painter.add(star(c + vec2(0.62 * s, -0.62 * s), 0.35 * s));
         }
+        Icon::Search => {
+            let r = 0.5 * s;
+            let lens = c + vec2(-0.18 * s, -0.18 * s);
+            painter.circle_stroke(lens, r, stroke);
+            let d = std::f32::consts::FRAC_1_SQRT_2;
+            painter.line_segment([lens + vec2(r * d, r * d), c + vec2(0.75 * s, 0.75 * s)], Stroke::new(2.0, color));
+        }
         Icon::Follow => {
             painter.line_segment([c + vec2(0.0, -0.75 * s), c + vec2(0.0, 0.75 * s)], stroke);
             painter.add(tri(vec![
@@ -294,6 +302,7 @@ pub fn primary_button(ui: &mut Ui, text: &str, enabled: bool) -> Response {
     let size = vec2(ui.available_width().max(galley.size().x + 24.0), 32.0);
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, resp) = ui.allocate_exact_size(size, sense);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, text));
     let fill = if !enabled {
         BG_WIDGET
     } else if resp.is_pointer_button_down_on() {

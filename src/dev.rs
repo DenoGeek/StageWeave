@@ -11,6 +11,9 @@
 //! * `STAGEWEAVE_BG=Clouds` uses a starter background; `STAGEWEAVE_CUE=40,60`
 //!   adds a looping cue with drums muted; `STAGEWEAVE_LAYOUT=lyrics|perform`
 //!   picks the workspace (for README screenshots).
+//! * `STAGEWEAVE_SEARCH=<query>` opens ⌘K search, `STAGEWEAVE_HOME_QUERY=<query>`
+//!   filters the home screen, `STAGEWEAVE_LIBRARY=<project>` opens that project's
+//!   "Add from Library".
 //! * `STAGEWEAVE_SCREENSHOT=out.ppm` (+ optional `STAGEWEAVE_SCREENSHOT_AT=secs`)
 //!   saves a screenshot of the main window and quits. Used for UI review.
 //!   With `STAGEWEAVE_SCREENSHOT_AT=stems` it waits until stems are loaded and
@@ -132,6 +135,19 @@ pub fn start(app: &mut StageWeaveApp, ctx: &egui::Context) {
             }
         }
         _ => {}
+    }
+    if let Ok(q) = std::env::var("STAGEWEAVE_SEARCH") {
+        (app.search.open, app.search.query) = (true, q);
+    }
+    if let Ok(q) = std::env::var("STAGEWEAVE_HOME_QUERY") {
+        app.go_home();
+        app.home_query = q;
+    }
+    if let Ok(name) = std::env::var("STAGEWEAVE_LIBRARY")
+        && let Some(id) = app.projects.iter().find(|p| p.name == name).map(|p| p.id)
+    {
+        app.open_project(id);
+        crate::ui::search::open_library(app);
     }
 }
 

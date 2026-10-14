@@ -216,7 +216,7 @@ impl Store {
 
 // --------------------------------------------------------------------------- projects & songs
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ProjectRow {
     pub id: i64,
     pub name: String,
@@ -399,7 +399,19 @@ impl Store {
         stmt.query_map([project_id], song_from_row).map(|rows| rows.flatten().collect()).unwrap_or_default()
     }
 
-    #[cfg(test)]
+    /// Every song in every project (without thumbnails), most recently
+    /// edited project first. Used for search and the song library.
+    pub fn all_songs(&self) -> Vec<SongRow> {
+        let conn = self.conn.lock().unwrap();
+        let cols = SONG_COLUMNS.replace("thumb", "NULL").replace("id, project_id", "s.id, s.project_id").replace("position", "s.position");
+        let Ok(mut stmt) = conn.prepare(&format!(
+            "SELECT {cols} FROM songs s JOIN projects p ON p.id = s.project_id ORDER BY p.updated_at DESC, s.position"
+        )) else {
+            return Vec::new();
+        };
+        stmt.query_map([], song_from_row).map(|rows| rows.flatten().collect()).unwrap_or_default()
+    }
+
     pub fn song(&self, id: i64) -> Option<SongRow> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(&format!("SELECT {SONG_COLUMNS} FROM songs WHERE id = ?1"), [id], song_from_row).optional().ok().flatten()

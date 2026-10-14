@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 use std::time::Instant;
@@ -186,6 +186,24 @@ pub struct CueState {
 pub enum ArchiveDone {
     Exported(PathBuf),
     Imported(i64),
+    /// Songs reused from other setlists (new song ids).
+    SongsAdded(Vec<i64>),
+}
+
+/// The ⌘K search over every project and song.
+#[derive(Default)]
+pub struct GlobalSearch {
+    pub open: bool,
+    pub query: String,
+    /// Highlighted result (keyboard).
+    pub cursor: usize,
+}
+
+/// "Add from Library": songs from other setlists, ready to reuse.
+#[derive(Default)]
+pub struct LibraryPicker {
+    pub query: String,
+    pub selected: Vec<i64>,
 }
 
 /// A project .zip being written or read on a background thread.
@@ -214,6 +232,13 @@ pub struct StageWeaveApp {
     pub export: crate::export::ExportPanel,
     pub archive_job: Option<ArchiveJob>,
     pub cue: CueState,
+    pub search: GlobalSearch,
+    pub library: Option<LibraryPicker>,
+    /// Filters on the home grid and the setlist table.
+    pub home_query: String,
+    pub setlist_query: String,
+    /// All songs of all projects (search), refreshed when stale.
+    song_index: Option<(Instant, Arc<Vec<SongRow>>)>,
 
     // Library
     pub store: Arc<Store>,
@@ -345,6 +370,11 @@ impl StageWeaveApp {
             export: Default::default(),
             archive_job: None,
             cue: CueState::default(),
+            search: GlobalSearch::default(),
+            library: None,
+            home_query: String::new(),
+            setlist_query: String::new(),
+            song_index: None,
             importer: Importer::new(store.clone(), ctx.clone()),
             queue: SplitQueue::new(splitter, ctx.clone()),
             store: store.clone(),
@@ -691,6 +721,13 @@ impl StageWeaveApp {
             Ok(ArchiveDone::Exported(p)) => {
                 self.toast(ToastKind::Success, format!("Saved {}", p.file_name().unwrap_or_default().to_string_lossy()));
             }
+            Ok(ArchiveDone::SongsAdded(ids)) => {
+                self.reload_projects();
+                self.reload_songs();
+                self.selected_song = ids.last().copied();
+                let n = ids.len();
+                self.toast(ToastKind::Success, format!("Added {n} song{} with stems and lyrics", if n == 1 { "" } else { "s" }));
+            }
             Ok(ArchiveDone::Imported(id)) => {
                 self.reload_projects();
                 self.open_project(id);
@@ -716,6 +753,63 @@ impl StageWeaveApp {
             None => Vec::new(),
         };
         self.split_cache.clear();
+        self.song_index = None;
+    }
+
+    /// Every song in every project, for search. Cached for a few seconds.
+    pub fn song_index(&mut self) -> Arc<Vec<SongRow>> {
+        match &self.song_index {
+            Some((at, songs)) if at.elapsed().as_secs() < 3 => songs.clone(),
+            _ => {
+                let songs = Arc::new(self.store.all_songs());
+                self.song_index = Some((Instant::now(), songs.clone()));
+                songs
+            }
+        }
+    }
+
+    /// Stems on disk for a song in any project (`None` if not split).
+    pub fn song_split_stems(&mut self, song: &SongRow) -> Option<usize> {
+        let project = self.projects.iter().find(|p| p.id == song.project_id)?.clone();
+        let model = self.model_by_key(song.effective_model(&project)).cloned()?;
+        let key = (song.id, model.key());
+        if !self.split_cache.contains_key(&key) {
+            let n = self.ws.song_stems(&project, song, &model.key(), &model.stems).map(|s| s.len());
+            self.split_cache.insert(key.clone(), n);
+        }
+        self.split_cache[&key]
+    }
+
+    /// Go to a search result: its project, then the song itself if it can be opened.
+    pub fn open_song_anywhere(&mut self, project_id: i64, song_id: i64, ctx: &egui::Context) {
+        if self.project_id() != Some(project_id) {
+            self.open_project(project_id);
+        }
+        self.selected_song = Some(song_id);
+        if self.songs.iter().any(|s| s.id == song_id && s.imported) {
+            self.open_song(song_id, ctx);
+        }
+    }
+
+    /// Copy songs from other setlists into the current project, with their
+    /// stems, lyrics, timing, cues and mix.
+    pub fn add_from_library(&mut self, song_ids: Vec<i64>, ctx: &egui::Context) {
+        let Some(project) = self.project_id() else { return };
+        if song_ids.is_empty() || self.archive_job.is_some() {
+            return;
+        }
+        let (store, ws) = (self.store.clone(), self.ws.clone());
+        self.start_archive_job("Adding songs", ctx, move |report| {
+            let mut added = Vec::new();
+            let n = song_ids.len();
+            for (i, id) in song_ids.into_iter().enumerate() {
+                let title = store.song(id).map(|s| s.title).unwrap_or_default();
+                report(i as f32 / n as f32, &title);
+                added.push(crate::song_library::reuse_song(&store, &ws, id, project)?);
+            }
+            ws.write_manifest(project);
+            Ok(ArchiveDone::SongsAdded(added))
+        });
     }
 
     pub fn project_id(&self) -> Option<i64> {
@@ -769,6 +863,9 @@ impl StageWeaveApp {
     }
 
     pub fn open_project(&mut self, id: i64) {
+        if self.project_id() != Some(id) {
+            self.setlist_query.clear();
+        }
         self.leave_song();
         self.screen = Screen::Project(id);
         self.reload_projects();
@@ -1624,6 +1721,64 @@ impl StageWeaveApp {
         }
     }
 
+    /// Pick a lyrics file (LRC, SRT, ChordPro, OpenLyrics…) for this song.
+    pub fn import_lyrics_dialog(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Import lyrics")
+            .add_filter("Lyrics", crate::lyric_import::EXTENSIONS)
+            .add_filter("All files", &["*"])
+            .pick_file()
+        else {
+            return;
+        };
+        self.import_lyrics_file(&path);
+    }
+
+    /// Replace this song's lyrics with a file's. Synced files keep their
+    /// timing; plain ones are timed like pasted lyrics. One undo step.
+    pub fn import_lyrics_file(&mut self, path: &Path) {
+        if self.current_song_id().is_none() {
+            return;
+        }
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) => return self.toast(ToastKind::Error, format!("Can't read {name}: {e}")),
+        };
+        let parsed = match crate::lyric_import::parse(&name, &crate::lyric_import::decode(&bytes), self.session.duration()) {
+            Ok(p) => p,
+            Err(e) => return self.toast(ToastKind::Error, format!("{name}: {e}")),
+        };
+        self.lyric_checkpoint("Import Lyrics", None);
+        self.history.suspended = true;
+        let l = &mut self.session.lyrics;
+        if l.title.trim().is_empty()
+            && let Some(t) = parsed.title
+        {
+            l.title = t;
+        }
+        if l.artist.trim().is_empty()
+            && let Some(a) = parsed.artist
+        {
+            l.artist = a;
+        }
+        l.raw_text = parsed.text;
+        match parsed.lines {
+            Some(lines) => {
+                let n = lines.len();
+                self.session.lyrics.lines = lines;
+                self.monitor_tab = 0;
+                self.save_song_state();
+                self.toast(ToastKind::Success, format!("Imported {n} timed lines ({})", parsed.format));
+            }
+            None => {
+                self.generate_lyrics();
+                self.toast(ToastKind::Info, format!("Imported from {}. Use AI → Align for timing that follows the singer.", parsed.format));
+            }
+        }
+        self.history.suspended = false;
+    }
+
     /// Use the finished result. For transcripts, `with_timing` = keep Whisper's
     /// timing (else spread evenly). Alignments keep the user's text exactly.
     pub fn apply_ai_result(&mut self, with_timing: bool) {
@@ -2116,6 +2271,15 @@ impl StageWeaveApp {
         });
         let (zips, dropped): (Vec<PathBuf>, Vec<PathBuf>) =
             dropped.into_iter().partition(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")));
+        // A lyrics file dropped on an open song replaces its lyrics.
+        let is_lyrics = |p: &PathBuf| {
+            p.extension().is_some_and(|e| crate::lyric_import::EXTENSIONS.iter().any(|x| e.eq_ignore_ascii_case(x)))
+        };
+        let (lyric_files, dropped): (Vec<PathBuf>, Vec<PathBuf>) =
+            dropped.into_iter().partition(|p| matches!(self.screen, Screen::Song { .. }) && is_lyrics(p));
+        if let Some(f) = lyric_files.first() {
+            self.import_lyrics_file(f);
+        }
         if let Some(zip) = zips.into_iter().next()
             && self.archive_job.is_none()
         {
@@ -2131,10 +2295,15 @@ impl StageWeaveApp {
             self.add_songs(&dropped);
         }
 
-        if ctx.egui_wants_keyboard_input() {
+        use egui::{Key, Modifiers};
+        // ⌘K / ⌘F: search everything (works even while typing elsewhere).
+        if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::K) | i.consume_key(Modifiers::COMMAND, Key::F)) {
+            self.search.open = !self.search.open;
+            self.search.cursor = 0;
+        }
+        if ctx.egui_wants_keyboard_input() || self.search.open || self.library.is_some() {
             return;
         }
-        use egui::{Key, Modifiers};
         let in_song = matches!(self.screen, Screen::Song { .. });
         // Replace-line prompt: Enter replaces, Esc cancels, nothing else.
         if let Some(Dialog::ReplaceLine { line, t }) = self.dialog {
@@ -2577,5 +2746,106 @@ mod history_tests {
         std::thread::sleep(std::time::Duration::from_millis(150));
         let t = p.position();
         assert!((5.0..5.3).contains(&t), "wrapped: {t}");
+    }
+
+    /// Two setlists in a private workspace; "Oceans" (with lyrics and stems) is in the first.
+    fn library_app(tag: &str) -> (StageWeaveApp, i64, i64, i64, PathBuf) {
+        let mut a = app();
+        let dir = std::env::temp_dir().join(format!("sw-lib-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        a.ws.set_root(&dir);
+        let sunday = a.create_project("Sunday");
+        let youth = a.create_project("Youth Night");
+        let folder = a.store.project(sunday).unwrap().folder;
+        std::fs::create_dir_all(dir.join(&folder).join("songs")).unwrap();
+        std::fs::write(dir.join(&folder).join("songs/Oceans.mp3"), b"audio").unwrap();
+        let song = a.store.add_song(sunday, &format!("{folder}/songs/Oceans.mp3"), "/m/Oceans.mp3", "Oceans").unwrap();
+        a.store.finish_import(song, 240.0, 44_100, &[]);
+        a.store.save_song_state(song, "You call me out upon the waters", "[]", "{}", "{}");
+        let row = a.store.song(song).unwrap();
+        let project = a.store.project(sunday).unwrap();
+        let stems = a.ws.stem_dir(&project, &row, &project.default_model);
+        std::fs::create_dir_all(&stems).unwrap();
+        for k in &a.model_by_key(&project.default_model).unwrap().stems {
+            std::fs::write(stems.join(format!("{}.wav", k.label().to_lowercase())), b"v").unwrap();
+        }
+        a.reload_projects();
+        (a, sunday, youth, song, dir)
+    }
+
+    #[test]
+    fn cmd_k_finds_a_song_by_its_lyrics_and_opens_its_setlist() {
+        use egui_kittest::kittest::Queryable;
+        let (mut a, sunday, youth, song, dir) = library_app("k");
+        a.open_project(youth);
+        let mut h = Harness::new_ui_state(
+            |ui, app: &mut StageWeaveApp| {
+                app.handle_input(ui.ctx());
+                crate::ui::search::palette(app, ui.ctx());
+            },
+            a,
+        );
+        h.run_steps(1);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::K);
+        h.run_steps(1);
+        assert!(h.state().search.open);
+        h.state_mut().search.query = "upon the WATERS".into();
+        h.run_steps(2);
+        h.get_by_label("Song Oceans").click();
+        h.run_steps(2);
+        let a = h.state();
+        assert!(!a.search.open, "closes after picking");
+        assert_eq!((a.project_id(), a.selected_song), (Some(sunday), Some(song)));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn add_from_library_reuses_a_split_song_with_its_lyrics() {
+        use egui_kittest::kittest::Queryable;
+        let (mut a, _, youth, _, dir) = library_app("add");
+        a.open_project(youth);
+        crate::ui::search::open_library(&mut a);
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(1280.0, 860.0))
+            .build_ui_state(|ui, app: &mut StageWeaveApp| crate::ui::search::library_picker(app, ui.ctx()), a);
+        h.run_steps(2);
+        h.get_by_label("Song Oceans").click();
+        h.run_steps(2);
+        assert_eq!(h.state().library.as_ref().unwrap().selected.len(), 1);
+        h.get_by_label("Add Song").click();
+        h.run_steps(2);
+        let a = h.state_mut();
+        assert!(a.library.is_none());
+        for _ in 0..300 {
+            a.poll_archive();
+            if a.archive_job.is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(a.songs.len(), 1);
+        let added = a.songs[0].clone();
+        assert_eq!((added.title.as_str(), added.lyrics_raw.as_str()), ("Oceans", "You call me out upon the waters"));
+        assert!(matches!(a.song_status(&added), SongStatus::Split(n) if n > 0), "stems came along");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn importing_an_lrc_keeps_its_timing_and_undoes_in_one_step() {
+        let mut a = app();
+        a.screen = Screen::Song { project: 0, song: 0 };
+        a.session.lyrics.artist.clear();
+        let dir = std::env::temp_dir().join(format!("sw-lrc-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("oceans.lrc");
+        std::fs::write(&f, "[ar:Hillsong UNITED]\n[00:12.00]You call me out\n[00:16.50]Upon the waters\n").unwrap();
+        a.import_lyrics_file(&f);
+        let got: Vec<(f64, f64, String)> = a.session.lyrics.lines.iter().map(|l| (l.start, l.end, l.text.clone())).collect();
+        assert_eq!(got, vec![(12.0, 16.5, "You call me out".into()), (16.5, 24.5, "Upon the waters".into())]);
+        assert_eq!(a.session.lyrics.raw_text, "You call me out\nUpon the waters");
+        assert_eq!(a.session.lyrics.artist, "Hillsong UNITED");
+        a.undo();
+        assert_eq!(texts(&a), vec!["A", "B", "C"]);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

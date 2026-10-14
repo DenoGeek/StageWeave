@@ -7,6 +7,8 @@ A desktop app for worship teams and live music. Split any song into stems, mix t
 ## Features
 
 - **Setlists.** Make one project per service or event. Drop songs in, set the key, BPM and notes, and switch songs with PageUp / PageDown.
+- **Search everything.** Press **⌘K** (Ctrl+K) to find any project or song across every setlist, by title, artist, key, notes or a line of the lyrics. You can also filter projects on Home or songs within a setlist.
+- **Reuse songs.** **Add from Library…** brings a song from another setlist into this one, already split, with its lyrics, timing, cues and mix. Files are hard-linked where possible, so a song used in many setlists only takes up disk space once.
 - **Stem splitting.** Separate vocals, drums, bass and other with Demucs, or karaoke and instrumental with UVR models. It all runs on your machine, and the engine installs itself the first time you split a song.
 - **Live mixer.** Each stem has mute, solo, volume and pan, plus level meters and a master fader.
 - **Cues.** While playing, press **Q** to mark the start of a section and **Q** again to loop it. Each cue keeps its own mix (for example, the chorus with drums muted). Exit it with **Esc**, the **Exit Cue** button, or by clicking elsewhere on the timeline.
@@ -22,6 +24,9 @@ A desktop app for worship teams and live music. Split any song into stems, mix t
   - Transcribe a song with Whisper (OpenAI or Groq), or align lyrics you already have to the singer's phrases.
   - Alignment can run fully on-device.
   - Transcription works phrase by phrase on the vocals stem, which helps a lot with non-English songs.
+- **Import lyrics.** Click **Import…** next to **AI**, or drop a file on the song. Formats:
+  - LRC, SRT and WebVTT keep their timing.
+  - ChordPro, OpenLyrics / OpenLP, OpenSong and plain text are cleaned of chords and section labels, then timed automatically.
 - **Lyric editing.**
   - Edit lines on the timeline or in a list, with full undo.
   - **N** adds a line at the playhead. **E** stretches the previous line to the playhead.
@@ -65,6 +70,7 @@ xattr -dr com.apple.quarantine /Applications/StageWeave.app
 | Home / End | Jump to start / end |
 | ← / → | Nudge 5 seconds |
 | L | Toggle loop |
+| ⌘/Ctrl + K (or F) | Search all projects, songs and lyrics |
 | Q | Mark a cue start, then close the cue and loop it |
 | Esc | Exit the cue |
 | N | New lyric line at the playhead (asks before replacing a line already there) |
