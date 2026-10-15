@@ -15,6 +15,7 @@ use super::widgets::{
 
 const HEAD_W: f32 = 236.0;
 const RULER_H: f32 = 28.0;
+const SECTION_H: f32 = 18.0;
 const LYRIC_H: f32 = 40.0;
 const HSCROLL_H: f32 = 12.0;
 const MAX_PX_PER_SEC: f32 = 240.0;
@@ -25,7 +26,12 @@ pub fn draw(app: &mut StageWeaveApp, ui: &mut Ui) {
     let mut zoom_by = None;
     let mut reset_cue_mix = false;
     let mut exit_cue = false;
+    let mut reset_section_mix = None;
     let cue_name = app.cue.active.and_then(|i| app.session.cues.get(i)).map(|c| (c.name.clone(), c.mix.is_some()));
+    let section_name = app.section.current.and_then(|i| {
+        let s = app.session.sections.get(i)?;
+        Some((i, s.name.clone(), app.section_mix(i) != app.song_mix()))
+    });
     panel_header(ui, &["Timeline"], &mut tab, |ui| {
         if !has_media {
             return;
@@ -41,6 +47,16 @@ pub fn draw(app: &mut StageWeaveApp, ui: &mut Ui) {
                 RichText::new(format!("{name} mix: mute, solo and volume changes apply only inside this cue"))
                     .size(11.0)
                     .color(CUE),
+            );
+            ui.add_space(10.0);
+        } else if let Some((i, name, own_mix)) = &section_name {
+            if *own_mix && ui.small_button("Use song mix").on_hover_text("Drop this section's own mute / volume settings").clicked() {
+                reset_section_mix = Some(*i);
+            }
+            ui.label(
+                RichText::new(format!("{name} mix: mute, solo and volume changes apply only inside this section"))
+                    .size(11.0)
+                    .color(SECTION),
             );
             ui.add_space(10.0);
         }
@@ -64,6 +80,9 @@ pub fn draw(app: &mut StageWeaveApp, ui: &mut Ui) {
     }
     if exit_cue {
         app.exit_cue();
+    }
+    if let Some(i) = reset_section_mix {
+        app.reset_section_mix(i);
     }
 
     let body = ui.available_rect_before_wrap();
@@ -97,7 +116,8 @@ pub fn draw(app: &mut StageWeaveApp, ui: &mut Ui) {
     // Regions.
     let ruler = Rect::from_min_max(pos2(lanes_left, body.top()), pos2(body.right(), body.top() + RULER_H));
     let corner = Rect::from_min_max(body.min, pos2(lanes_left, ruler.bottom()));
-    let tracks_area = Rect::from_min_max(pos2(body.left(), ruler.bottom()), pos2(body.right(), body.bottom() - HSCROLL_H));
+    let section_lane = Rect::from_min_max(pos2(body.left(), ruler.bottom()), pos2(body.right(), ruler.bottom() + SECTION_H));
+    let tracks_area = Rect::from_min_max(pos2(body.left(), section_lane.bottom()), pos2(body.right(), body.bottom() - HSCROLL_H));
     let hscroll = Rect::from_min_max(pos2(lanes_left, body.bottom() - HSCROLL_H), body.max);
 
     let rows = rows_for(app);
@@ -168,6 +188,7 @@ pub fn draw(app: &mut StageWeaveApp, ui: &mut Ui) {
 
     draw_ruler(app, ui, ruler, corner, &view, duration);
     draw_cues(app, ui, ruler, tracks_area, &view);
+    draw_sections(app, ui, section_lane, lanes_left, tracks_area, &view);
     draw_hscroll(app, ui, hscroll, lane_w, duration);
 
     // Playhead across ruler + tracks.
@@ -418,6 +439,200 @@ fn draw_cues(app: &mut StageWeaveApp, ui: &mut Ui, ruler: Rect, tracks: Rect, vi
     }
 }
 
+/// Sections in their own lane under the ruler: click to jump to one,
+/// right-click to rename it or set its mix.
+fn draw_sections(app: &mut StageWeaveApp, ui: &mut Ui, lane: Rect, lanes_left: f32, tracks: Rect, view: &View) {
+    let head = Rect::from_min_max(lane.min, pos2(lanes_left, lane.bottom()));
+    let lane = Rect::from_min_max(pos2(lanes_left, lane.top()), lane.max);
+    let p = ui.painter();
+    p.rect_filled(head, 0.0, BG_PANEL_HEADER);
+    p.rect_filled(lane, 0.0, BG_PANEL_HEADER.gamma_multiply(0.85));
+    p.line_segment([head.left_bottom(), lane.right_bottom()], Stroke::new(1.0, BORDER_STRONG));
+    p.line_segment([pos2(lanes_left, lane.top()), pos2(lanes_left, lane.bottom())], Stroke::new(1.0, BORDER_STRONG));
+    p.text(head.left_center() + vec2(12.0, 0.0), Align2::LEFT_CENTER, "SECTIONS", FontId::proportional(9.5), TEXT_FAINT);
+
+    // Clicking the empty lane seeks, like the ruler.
+    let bg = ui.interact(lane, ui.id().with("section_lane"), Sense::click());
+    if bg.clicked()
+        && let Some(pt) = bg.interact_pointer_pos()
+    {
+        app.seek(view.t(pt.x));
+    }
+    if app.session.sections.is_empty() && app.section.recording.is_none() {
+        bg.on_hover_text("While playing, press S where a part starts and S again where it ends. Then give it its own mutes and volumes.");
+        p.text(lane.left_center() + vec2(10.0, 0.0), Align2::LEFT_CENTER, "S: mark a section with its own mix", FontId::proportional(10.0), TEXT_FAINT);
+    }
+
+    let painter = ui.painter().with_clip_rect(Rect::from_min_max(lane.min, tracks.max));
+    let band_y = (lane.top() + 2.0, lane.bottom() - 2.0);
+    let pos = app.position();
+    if let Some(start) = app.section.recording {
+        let (a, b) = if pos < start { (pos, start) } else { (start, pos) };
+        let r = Rect::from_min_max(pos2(view.x(a), band_y.0), pos2(view.x(b).max(view.x(a) + 2.0), band_y.1));
+        let pulse = 0.55 + 0.45 * (ui.input(|i| i.time) * 4.0).sin().abs() as f32;
+        painter.rect_filled(r, 3.0, DANGER.gamma_multiply(pulse));
+        ui.ctx().request_repaint();
+    }
+
+    let song = app.song_mix();
+    let stems: Vec<(crate::model::StemKind, String, Color32)> = app.session.tracks.iter().map(|t| (t.kind, t.name.clone(), t.color)).collect();
+    let mut act: Option<(usize, SectionAct)> = None;
+    for i in 0..app.session.sections.len() {
+        let s = app.session.sections[i].clone();
+        let current = app.section.current == Some(i);
+        let mix = app.section_mix(i);
+        let own = mix != song;
+        let (x0, x1) = (view.x(s.start), view.x(s.end));
+        if x1 < lane.left() || x0 > lane.right() {
+            continue;
+        }
+        let band = Rect::from_min_max(pos2(x0 + 1.0, band_y.0), pos2(x1.max(x0 + 5.0) - 1.0, band_y.1));
+        if current {
+            let region = Rect::from_min_max(pos2(x0, tracks.top()), pos2(x1, tracks.bottom()));
+            painter.rect_filled(region, 0.0, SECTION.gamma_multiply(0.05));
+        }
+        let resp = ui.interact(band, ui.id().with(("section", i)), Sense::click());
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, current, format!("Section {}", s.name)));
+        let fill = if current {
+            SECTION
+        } else if resp.hovered() {
+            SECTION.gamma_multiply(0.75)
+        } else {
+            SECTION.gamma_multiply(if own { 0.55 } else { 0.35 })
+        };
+        painter.rect_filled(band, 3.0, fill);
+
+        // Name, then the stems it silences (struck through).
+        let silenced: Vec<crate::model::StemKind> = mix.iter().filter(|m| m.muted && !song.iter().any(|b| b.kind == m.kind && b.muted)).map(|m| m.kind).collect();
+        let galley = painter.layout_no_wrap(s.name.clone(), FontId::proportional(10.0), Color32::BLACK);
+        let mut x = band.left() + 5.0;
+        if galley.size().x + 10.0 < band.width() {
+            painter.galley(pos2(x, band.center().y - galley.size().y / 2.0), galley.clone(), Color32::BLACK);
+            x += galley.size().x + 6.0;
+            for kind in &silenced {
+                if x + 12.0 > band.right() - 3.0 {
+                    break;
+                }
+                let r = Rect::from_center_size(pos2(x + 5.5, band.center().y), vec2(11.0, 11.0));
+                super::widgets::paint_stem_icon(&painter, r, *kind, Color32::from_black_alpha(200));
+                painter.line_segment([r.left_bottom() + vec2(-1.0, 1.0), r.right_top() + vec2(1.0, -1.0)], Stroke::new(1.5, DANGER));
+                x += 14.0;
+            }
+        }
+
+        let tip = format!(
+            "{}  {} – {}\n{}\nClick to jump here · right-click to set its mix",
+            s.name,
+            timecode(s.start),
+            timecode(s.end),
+            mix_summary(&mix, &song, &stems),
+        );
+        let resp = resp.on_hover_text(tip).on_hover_cursor(egui::CursorIcon::PointingHand);
+        if resp.clicked() {
+            act = Some((i, SectionAct::Jump));
+        }
+        resp.context_menu(|ui| {
+            ui.set_min_width(250.0);
+            ui.label(RichText::new(format!("{} – {}", timecode(s.start), timecode(s.end))).size(11.0).color(TEXT_FAINT));
+            let mut name = s.name.clone();
+            if ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY)).changed() {
+                app.session.sections[i].name = name;
+                app.save_song_state();
+            }
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+                for preset in ["Intro", "Verse", "Pre-Chorus", "Chorus", "Bridge", "Tag", "Outro"] {
+                    if ui.small_button(preset).clicked() {
+                        app.session.sections[i].name = preset.to_owned();
+                        app.save_song_state();
+                    }
+                }
+            });
+            ui.separator();
+            ui.label(RichText::new("Section mix").size(11.0).color(TEXT_DIM));
+            if stems.is_empty() {
+                ui.label(RichText::new("Split the song into stems to give this section its own mix.").size(11.0).color(TEXT_FAINT));
+            }
+            for (kind, label, color) in &stems {
+                let Some(m) = mix.iter().find(|m| m.kind == *kind).cloned() else { continue };
+                ui.horizontal(|ui| {
+                    super::widgets::stem_badge(ui, 18.0, *kind, *color, !m.muted);
+                    ui.add_sized([70.0, 18.0], egui::Label::new(RichText::new(label).size(12.0)).truncate());
+                    let chip = toggle_chip(ui, "M", m.muted, MUTE_ON, "Mute in this section");
+                    chip.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, m.muted, format!("Mute {label} in section")));
+                    if chip.clicked() {
+                        app.edit_section_stem(i, *kind, |t| t.muted = !t.muted);
+                    }
+                    let mut db = m.gain_db;
+                    if gain_fader(ui, &mut db, 110.0, *color).changed() {
+                        app.edit_section_stem(i, *kind, |t| t.gain_db = db);
+                    }
+                    ui.label(RichText::new(if db <= crate::model::MIN_DB { "-∞".to_owned() } else { format!("{db:+.0} dB") }).size(10.5).color(TEXT_FAINT));
+                });
+            }
+            if own && ui.button("Use Song Mix").on_hover_text("Drop this section's own stem settings").clicked() {
+                act = Some((i, SectionAct::ResetMix));
+                ui.close();
+            }
+            ui.separator();
+            if ui.button("Set Start to Playhead").clicked() {
+                act = Some((i, SectionAct::SetStart(pos)));
+                ui.close();
+            }
+            if ui.button("Set End to Playhead").clicked() {
+                act = Some((i, SectionAct::SetEnd(pos)));
+                ui.close();
+            }
+            ui.separator();
+            if ui.button(RichText::new("Delete Section").color(DANGER)).clicked() {
+                act = Some((i, SectionAct::Delete));
+                ui.close();
+            }
+        });
+    }
+    if let Some((i, a)) = act {
+        match a {
+            SectionAct::Jump => {
+                if let Some(s) = app.session.sections.get(i) {
+                    let t = s.start;
+                    app.seek(t);
+                }
+            }
+            SectionAct::SetStart(t) | SectionAct::SetEnd(t) => app.set_section_bound(i, matches!(a, SectionAct::SetStart(_)), t),
+            SectionAct::ResetMix => app.reset_section_mix(i),
+            SectionAct::Delete => app.delete_section(i),
+        }
+    }
+}
+
+/// "Muted: Drums, Bass · Vocals −6 dB" — how a section differs from the song.
+fn mix_summary(mix: &[crate::model::TrackMix], song: &[crate::model::TrackMix], stems: &[(crate::model::StemKind, String, Color32)]) -> String {
+    let name = |k: crate::model::StemKind| stems.iter().find(|s| s.0 == k).map_or(k.label().to_owned(), |s| s.1.clone());
+    let base = |k| song.iter().find(|b| b.kind == k);
+    let muted: Vec<String> = mix.iter().filter(|m| m.muted && !base(m.kind).is_some_and(|b| b.muted)).map(|m| name(m.kind)).collect();
+    let mut parts = Vec::new();
+    if !muted.is_empty() {
+        parts.push(format!("Muted: {}", muted.join(", ")));
+    }
+    for m in mix.iter().filter(|m| !m.muted) {
+        if let Some(b) = base(m.kind)
+            && (m.gain_db - b.gain_db).abs() >= 0.5
+        {
+            parts.push(format!("{} {:+.0} dB", name(m.kind), m.gain_db - b.gain_db));
+        }
+    }
+    if parts.is_empty() { "Song mix".to_owned() } else { parts.join(" · ") }
+}
+
+#[derive(Clone, Copy)]
+enum SectionAct {
+    Jump,
+    SetStart(f64),
+    SetEnd(f64),
+    ResetMix,
+    Delete,
+}
+
 #[derive(Clone, Copy)]
 enum CueAct {
     Loop,
@@ -534,9 +749,7 @@ fn track_row(
         ui.set_clip_rect(clip.intersect(head));
         let t = &mut app.session.tracks[i];
         ui.horizontal(|ui| {
-            let (badge, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
-            ui.painter().rect_filled(badge, 3.0, t.color.gamma_multiply(if audible { 1.0 } else { 0.35 }));
-            ui.painter().text(badge.center(), Align2::CENTER_CENTER, t.kind.icon(), FontId::proportional(10.0), Color32::BLACK);
+            super::widgets::stem_badge(ui, 16.0, t.kind, t.color, audible).on_hover_text(t.kind.label());
             ui.add(egui::Label::new(RichText::new(&t.name).strong().color(if audible { Color32::WHITE } else { TEXT_DIM })).truncate().selectable(false));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 3.0;
@@ -745,6 +958,32 @@ mod tests {
         assert_eq!(h.state().cue.active, Some(0));
         h.get_by_label("Exit Cue").click(); // banner above the tracks
         h.run_steps(2);
+        assert!(h.state().cue.active.is_none());
+    }
+
+    #[test]
+    fn a_section_mutes_a_stem_from_its_menu() {
+        let mut app = StageWeaveApp::with_context(&egui::Context::default(), crate::dev::Dev::demo());
+        app.session.source = app.decoder.load(std::path::Path::new("song.mp3")).ok();
+        app.session.tracks = [crate::model::StemKind::Vocals, crate::model::StemKind::Drums]
+            .into_iter()
+            .map(|k| crate::model::Track::new(k, crate::model::Peaks::default(), None, None))
+            .collect();
+        app.session.sections.push(crate::model::Section { name: "Chorus".into(), start: 20.0, end: 60.0, mix: None });
+        let mut h = Harness::builder().with_size(egui::vec2(1200.0, 400.0)).build_ui_state(|ui, app: &mut StageWeaveApp| draw(app, ui), app);
+        h.run_steps(3);
+        h.get_by_label("Section Chorus").click_secondary();
+        h.run_steps(2);
+        h.get_by_label("Mute Drums in section").click();
+        h.run_steps(2);
+        let a = h.state();
+        let mix = a.session.sections[0].mix.as_ref().expect("section has its own mix");
+        assert!(mix.iter().find(|m| m.kind == crate::model::StemKind::Drums).unwrap().muted);
+        assert!(!a.session.tracks[1].muted, "the song's mix is untouched");
+        // Clicking the band jumps there, without looping.
+        h.get_by_label("Section Chorus").click();
+        h.run_steps(2);
+        assert!((h.state().position() - 20.0).abs() < 0.2);
         assert!(h.state().cue.active.is_none());
     }
 }

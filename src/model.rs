@@ -107,18 +107,6 @@ impl StemKind {
         }
     }
 
-    pub fn icon(self) -> &'static str {
-        match self {
-            Self::Vocals => "V",
-            Self::Drums => "D",
-            Self::Bass => "B",
-            Self::Guitar => "G",
-            Self::Piano => "P",
-            Self::Other => "O",
-            Self::Instrumental => "I",
-        }
-    }
-
     pub fn color(self) -> Color32 {
         match self {
             Self::Vocals => Color32::from_rgb(232, 93, 160),
@@ -520,6 +508,9 @@ pub struct SongMixer {
     pub tracks: Vec<TrackMix>,
     /// Cue loops for the song (saved with the mixer so they travel with it).
     pub cues: Vec<Cue>,
+    /// Sections (S to set start and end): parts of the song with their own
+    /// stem mix, applied as playback passes through. Never overlapping.
+    pub sections: Vec<Section>,
 }
 
 /// A section of the song to loop (Q to set start and end), optionally with
@@ -532,6 +523,47 @@ pub struct Cue {
     /// Per-stem settings used while this cue plays (`None` = the song's mix).
     #[serde(default)]
     pub mix: Option<Vec<TrackMix>>,
+}
+
+/// A part of the song that plays with its own stem mix. Unlike a cue it
+/// doesn't loop: playback passes through and the mix switches on the way.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Section {
+    pub name: String,
+    pub start: f64,
+    pub end: f64,
+    /// Per-stem settings inside this section (`None` = the song's mix).
+    #[serde(default)]
+    pub mix: Option<Vec<TrackMix>>,
+}
+
+/// The section playing at `t`, if any.
+pub fn section_at(sections: &[Section], t: f64) -> Option<usize> {
+    sections.iter().position(|s| t >= s.start && t < s.end)
+}
+
+/// Add a section, taking over the time it covers: overlapping sections are
+/// trimmed, split around it, or dropped when fully covered. Keeps the list
+/// sorted. Returns the new section's index.
+pub fn insert_section(sections: &mut Vec<Section>, new: Section) -> usize {
+    let mut out: Vec<Section> = Vec::with_capacity(sections.len() + 2);
+    for s in sections.drain(..) {
+        if s.end <= new.start || s.start >= new.end {
+            out.push(s);
+            continue;
+        }
+        if s.start < new.start - 0.25 {
+            out.push(Section { end: new.start, ..s.clone() });
+        }
+        if s.end > new.end + 0.25 {
+            out.push(Section { start: new.end, ..s });
+        }
+    }
+    out.push(new.clone());
+    out.sort_by(|a, b| a.start.total_cmp(&b.start));
+    let i = out.iter().position(|s| *s == new).unwrap_or(0);
+    *sections = out;
+    i
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -552,6 +584,7 @@ impl SongMixer {
                 .map(|t| TrackMix { kind: t.kind, gain_db: t.gain_db, pan: t.pan, muted: t.muted, solo: t.solo })
                 .collect(),
             cues: Vec::new(),
+            sections: Vec::new(),
         }
     }
 
@@ -581,6 +614,7 @@ pub struct Session {
     pub tracks: Vec<Track>,
     pub lyrics: Lyrics,
     pub cues: Vec<Cue>,
+    pub sections: Vec<Section>,
 }
 
 impl Session {
@@ -614,6 +648,34 @@ mod tests {
         assert!((p.data[0] - 0.1).abs() < 1e-6);
         assert!((p.data[1] - 0.8).abs() < 1e-6);
         assert!((buf.duration() - 1.0).abs() < 1e-9);
+    }
+
+    fn sec(name: &str, start: f64, end: f64) -> Section {
+        Section { name: name.into(), start, end, mix: None }
+    }
+
+    #[test]
+    fn a_new_section_takes_over_the_time_it_covers() {
+        let mut s = vec![sec("A", 0.0, 10.0), sec("B", 10.0, 20.0), sec("C", 30.0, 60.0)];
+        // Covers the end of A, all of B, and the middle of C.
+        let i = insert_section(&mut s, sec("N", 8.0, 40.0));
+        let got: Vec<(&str, f64, f64)> = s.iter().map(|x| (x.name.as_str(), x.start, x.end)).collect();
+        assert_eq!(got, vec![("A", 0.0, 8.0), ("N", 8.0, 40.0), ("C", 40.0, 60.0)]);
+        assert_eq!(i, 1);
+        // Inside one: split around it.
+        let i = insert_section(&mut s, sec("M", 45.0, 50.0));
+        assert_eq!(i, 3);
+        assert_eq!((s[2].start, s[2].end, s[4].start, s[4].end), (40.0, 45.0, 50.0, 60.0));
+        assert_eq!(section_at(&s, 9.0), Some(1));
+        assert_eq!(section_at(&s, 40.0), Some(2));
+        assert_eq!(section_at(&s, 61.0), None);
+    }
+
+    #[test]
+    fn mixers_saved_before_sections_still_load() {
+        let m: SongMixer = serde_json::from_str(r#"{"master_db":-3.0,"tracks":[],"cues":[]}"#).unwrap();
+        assert!(m.sections.is_empty());
+        assert_eq!(m.master_db, -3.0);
     }
 }
 

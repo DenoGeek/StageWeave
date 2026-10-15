@@ -26,6 +26,8 @@ pub const MUTE_ON: Color32 = Color32::from_rgb(44, 168, 140);
 pub const SOLO_ON: Color32 = Color32::from_rgb(226, 186, 52);
 /// Cue loops (timeline bands, transport).
 pub const CUE: Color32 = Color32::from_rgb(64, 204, 172);
+/// Sections with their own mix (timeline lane, transport).
+pub const SECTION: Color32 = Color32::from_rgb(226, 178, 118);
 pub const DANGER: Color32 = Color32::from_rgb(232, 72, 72);
 pub const SUCCESS: Color32 = Color32::from_rgb(70, 190, 110);
 

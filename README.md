@@ -12,6 +12,7 @@ A desktop app for worship teams and live music. Split any song into stems, mix t
 - **Stem splitting.** Separate vocals, drums, bass and other with Demucs, or karaoke and instrumental with UVR models. It all runs on your machine, and the engine installs itself the first time you split a song.
 - **Live mixer.** Each stem has mute, solo, volume and pan, plus level meters and a master fader.
 - **Cues.** While playing, press **Q** to mark the start of a section and **Q** again to loop it. Each cue keeps its own mix (for example, the chorus with drums muted). Exit it with **Esc**, the **Exit Cue** button, or by clicking elsewhere on the timeline.
+- **Sections.** Press **S** where a part of the song starts and **S** again where it ends. Playback never stops: whenever the playhead is inside a section, that section's mix plays (for example, drums muted in the bridge, bass down in the verse), and the song's own mix comes back after it. Change mutes and volumes while the section plays, or right-click it in the **Sections** lane to rename it and set its mix. The mix switches on the exact sample, and lyric video exports follow it too.
 - **Lyric slides.**
   - Karaoke-style highlighting, with an optional translation line.
   - Themes, text size, and "next line" and progress bar options.
@@ -72,7 +73,8 @@ xattr -dr com.apple.quarantine /Applications/StageWeave.app
 | L | Toggle loop |
 | ⌘/Ctrl + K (or F) | Search all projects, songs and lyrics |
 | Q | Mark a cue start, then close the cue and loop it |
-| Esc | Exit the cue |
+| S | Mark a section start, then close it (it keeps playing with its own mix) |
+| Esc | Exit the cue, or cancel marking a cue or section |
 | N | New lyric line at the playhead (asks before replacing a line already there) |
 | E | Stretch the previous lyric line to the playhead |
 | Enter | Stamp a line (tap sync) |

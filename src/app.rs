@@ -183,6 +183,19 @@ pub struct CueState {
     base: Option<Vec<crate::model::TrackMix>>,
 }
 
+/// Sections: S marks a start, S again closes it. Playback never stops; the
+/// section's mix plays while the playhead is inside it.
+#[derive(Default)]
+pub struct SectionState {
+    /// Start of a section being marked (waiting for the second S).
+    pub recording: Option<f64>,
+    /// Index into `session.sections` of the one under the playhead, whose mix
+    /// the mixer strips are showing (and editing).
+    pub current: Option<usize>,
+    /// The song's own stem settings while the strips show a section's.
+    base: Option<Vec<crate::model::TrackMix>>,
+}
+
 pub enum ArchiveDone {
     Exported(PathBuf),
     Imported(i64),
@@ -232,6 +245,7 @@ pub struct StageWeaveApp {
     pub export: crate::export::ExportPanel,
     pub archive_job: Option<ArchiveJob>,
     pub cue: CueState,
+    pub section: SectionState,
     pub search: GlobalSearch,
     pub library: Option<LibraryPicker>,
     /// Filters on the home grid and the setlist table.
@@ -370,6 +384,7 @@ impl StageWeaveApp {
             export: Default::default(),
             archive_job: None,
             cue: CueState::default(),
+            section: SectionState::default(),
             search: GlobalSearch::default(),
             library: None,
             home_query: String::new(),
@@ -504,6 +519,8 @@ impl StageWeaveApp {
         if self.cue.active.is_some() {
             self.exit_cue();
         }
+        // The cue's mix wins over any section while it loops.
+        self.leave_section();
         self.cue.recording = None;
         let base = SongMixer::capture(&self.session.tracks, self.master_db).tracks;
         if let Some(mix) = &cue.mix {
@@ -578,7 +595,209 @@ impl StageWeaveApp {
 
     fn reset_cues(&mut self) {
         self.cue = CueState::default();
+        self.section = SectionState::default();
         self.playback.set_loop(None);
+    }
+
+    // ------------------------------------------------------------------ sections
+
+    /// S: first press marks a section's start, second press closes it.
+    /// Playback carries on either way.
+    pub fn section_key(&mut self) {
+        if !self.can_play() {
+            return;
+        }
+        let t = self.position();
+        let Some(start) = self.section.recording.take() else {
+            self.section.recording = Some(t);
+            return;
+        };
+        let (start, end) = if t < start { (t, start) } else { (start, t) };
+        if end - start < 0.5 {
+            self.toast(ToastKind::Info, "Section too short. Press S to start a new one.");
+            return;
+        }
+        let n = (1..).find(|n| !self.session.sections.iter().any(|s| s.name == format!("Section {n}"))).unwrap_or(1);
+        let name = format!("Section {n}");
+        self.leave_section();
+        crate::model::insert_section(
+            &mut self.session.sections,
+            crate::model::Section { name: name.clone(), start, end, mix: None },
+        );
+        self.follow_sections();
+        self.sync_mix();
+        self.save_song_state();
+        self.toast(ToastKind::Info, format!("{name} added. Mute or change volumes while it plays, or right-click it."));
+    }
+
+    /// The song's own stem settings (not a cue's or a section's).
+    pub fn song_mix(&self) -> Vec<crate::model::TrackMix> {
+        self.section
+            .base
+            .clone()
+            .or_else(|| self.cue.base.clone())
+            .unwrap_or_else(|| SongMixer::capture(&self.session.tracks, self.master_db).tracks)
+    }
+
+    /// Section `i`'s effective stem settings.
+    pub fn section_mix(&self, i: usize) -> Vec<crate::model::TrackMix> {
+        if self.section.current == Some(i) {
+            return SongMixer::capture(&self.session.tracks, self.master_db).tracks;
+        }
+        match self.session.sections.get(i).and_then(|s| s.mix.clone()) {
+            Some(m) => m,
+            None => self.song_mix(),
+        }
+    }
+
+    /// Show the mix of the section under the playhead on the mixer strips
+    /// (the audio thread already switches on its own, sample-accurately).
+    fn follow_sections(&mut self) {
+        let want = if self.cue.active.is_none() && !self.session.tracks.is_empty() {
+            crate::model::section_at(&self.session.sections, self.position())
+        } else {
+            None
+        };
+        if want == self.section.current {
+            return;
+        }
+        self.leave_section();
+        let Some(i) = want else { return };
+        self.section.base = Some(SongMixer::capture(&self.session.tracks, self.master_db).tracks);
+        if let Some(mix) = self.session.sections[i].mix.clone() {
+            crate::model::apply_track_mix(&mix, &mut self.session.tracks);
+        }
+        self.section.current = Some(i);
+        self.sync_mix();
+    }
+
+    /// Put the song's mix back on the strips, keeping edits made inside the
+    /// section as the section's own mix.
+    fn leave_section(&mut self) {
+        let Some(i) = self.section.current.take() else { return };
+        let base = self.section.base.take().unwrap_or_default();
+        if !self.session.tracks.is_empty() {
+            let current = SongMixer::capture(&self.session.tracks, self.master_db).tracks;
+            if let Some(s) = self.session.sections.get_mut(i) {
+                s.mix = (current != base).then_some(current);
+            }
+            crate::model::apply_track_mix(&base, &mut self.session.tracks);
+        }
+        self.sync_mix();
+        self.save_song_state();
+    }
+
+    /// Change one stem inside section `i` (from its menu, wherever the playhead is).
+    pub fn edit_section_stem(&mut self, i: usize, kind: StemKind, edit: impl FnOnce(&mut crate::model::TrackMix)) {
+        if i >= self.session.sections.len() {
+            return;
+        }
+        if self.section.current == Some(i) {
+            if let Some(t) = self.session.tracks.iter_mut().find(|t| t.kind == kind) {
+                let mut m = crate::model::TrackMix { kind, gain_db: t.gain_db, pan: t.pan, muted: t.muted, solo: t.solo };
+                edit(&mut m);
+                (t.gain_db, t.pan, t.muted, t.solo) = (m.gain_db, m.pan, m.muted, m.solo);
+            }
+        } else {
+            let mut mix = self.section_mix(i);
+            if let Some(m) = mix.iter_mut().find(|m| m.kind == kind) {
+                edit(m);
+            }
+            let song = self.song_mix();
+            self.session.sections[i].mix = (mix != song).then_some(mix);
+        }
+        self.sync_mix();
+        self.save_song_state();
+    }
+
+    /// Make section `i` use the song's mix again.
+    pub fn reset_section_mix(&mut self, i: usize) {
+        if self.section.current == Some(i)
+            && let Some(base) = self.section.base.clone()
+        {
+            crate::model::apply_track_mix(&base, &mut self.session.tracks);
+        }
+        if let Some(s) = self.session.sections.get_mut(i) {
+            s.mix = None;
+        }
+        self.sync_mix();
+        self.save_song_state();
+    }
+
+    pub fn delete_section(&mut self, i: usize) {
+        if self.section.current == Some(i) {
+            // Drop its mix rather than keeping the strips' edits.
+            self.reset_section_mix(i);
+        }
+        self.leave_section();
+        if i < self.session.sections.len() {
+            self.session.sections.remove(i);
+        }
+        self.follow_sections();
+        self.sync_mix();
+        self.save_song_state();
+    }
+
+    /// Move a section's start or end (keeps half a second, never overlaps a neighbour).
+    pub fn set_section_bound(&mut self, i: usize, start: bool, t: f64) {
+        if i >= self.session.sections.len() {
+            return;
+        }
+        self.leave_section();
+        let lo = if i > 0 { self.session.sections[i - 1].end } else { 0.0 };
+        let hi = self.session.sections.get(i + 1).map_or(self.session.duration().max(t), |n| n.start);
+        let s = &mut self.session.sections[i];
+        if start {
+            s.start = t.clamp(lo, s.end - 0.5);
+        } else {
+            s.end = t.clamp(s.start + 0.5, hi.max(s.start + 0.5));
+        }
+        self.follow_sections();
+        self.sync_mix();
+        self.save_song_state();
+    }
+
+    /// Gains and pans for the playback engine from per-stem settings,
+    /// with mute and solo applied.
+    fn stem_gains(&self, mix: &[crate::model::TrackMix]) -> (Vec<f32>, Vec<f32>) {
+        let tracks: Vec<crate::model::TrackMix> = self
+            .session
+            .tracks
+            .iter()
+            .map(|t| {
+                let own = crate::model::TrackMix { kind: t.kind, gain_db: t.gain_db, pan: t.pan, muted: t.muted, solo: t.solo };
+                mix.iter().find(|m| m.kind == t.kind).cloned().unwrap_or(own)
+            })
+            .collect();
+        let any_solo = tracks.iter().any(|t| t.solo);
+        let gains = tracks
+            .iter()
+            .map(|t| {
+                let on = if any_solo { t.solo } else { !t.muted };
+                if on && t.gain_db > crate::model::MIN_DB { 10f32.powf(t.gain_db / 20.0) } else { 0.0 }
+            })
+            .collect();
+        (gains, tracks.iter().map(|t| t.pan).collect())
+    }
+
+    /// What the engine plays inside each section that has its own mix
+    /// (nothing while a cue loops: its mix wins).
+    pub fn section_schedule(&self) -> Vec<crate::engine::SectionMix> {
+        if self.cue.active.is_some() || self.session.tracks.is_empty() {
+            return Vec::new();
+        }
+        let song = self.song_mix();
+        (0..self.session.sections.len())
+            .filter_map(|i| {
+                let s = &self.session.sections[i];
+                let mix = if self.section.current == Some(i) { self.section_mix(i) } else { s.mix.clone()? };
+                if mix == song {
+                    return None;
+                }
+                let (gains, pans) = self.stem_gains(&mix);
+                Some(crate::engine::SectionMix { start: s.start, end: s.end, gains, pans })
+            })
+            .collect()
     }
 
     // ------------------------------------------------------------------ export
@@ -605,14 +824,14 @@ impl StageWeaveApp {
         }
         let panel = &self.export;
         let mix = (panel.audio == ExportAudio::Mix && !self.session.tracks.is_empty()).then(|| {
-            let tracks = (0..self.session.tracks.len())
-                .filter(|&i| self.session.is_audible(i))
-                .filter_map(|i| {
-                    let t = &self.session.tracks[i];
-                    t.audio.clone().map(|a| (a, crate::engine::pan_gains(t.gain_linear(), t.pan)))
-                })
-                .collect::<Vec<_>>();
-            (tracks, 10f32.powf(self.master_db / 20.0))
+            // The song's mix, switching to each section's mix inside it, as on playback.
+            let lr = |gains: &[f32], pans: &[f32]| -> Vec<[f32; 2]> {
+                gains.iter().zip(pans).map(|(&g, &p)| crate::engine::pan_gains(g, p)).collect()
+            };
+            let (gains, pans) = self.stem_gains(&self.song_mix());
+            let tracks = self.session.tracks.iter().filter_map(|t| t.audio.clone()).zip(lr(&gains, &pans)).collect::<Vec<_>>();
+            let sections = self.section_schedule().into_iter().map(|s| (s.start, s.end, lr(&s.gains, &s.pans))).collect();
+            crate::export::Mixdown { tracks, master: 10f32.powf(self.master_db / 20.0), sections }
         });
         let audio = match &mix {
             Some(_) => std::env::temp_dir().join(format!("stageweave-mix-{}-{}.wav", std::process::id(), song.id)),
@@ -1182,6 +1401,7 @@ impl StageWeaveApp {
         self.pending_mixer = song.mixer.as_deref().and_then(|j| serde_json::from_str(j).ok());
         self.master_db = self.pending_mixer.as_ref().map_or(0.0, |m| m.master_db);
         self.session.cues = self.pending_mixer.as_ref().map(|m| m.cues.clone()).unwrap_or_default();
+        self.session.sections = self.pending_mixer.as_ref().map(|m| m.sections.clone()).unwrap_or_default();
         self.last_saved_state = self.state_json().unwrap_or_default();
 
         // Source audio: use the preloaded copy if we have it.
@@ -1276,6 +1496,16 @@ impl StageWeaveApp {
         };
         let mut mixer = mixer;
         mixer.cues = self.session.cues.clone();
+        mixer.sections = self.session.sections.clone();
+        if let (Some(i), Some(base)) = (self.section.current, &self.section.base) {
+            // The strips show the section's mix; the song keeps its own.
+            if !self.session.tracks.is_empty()
+                && let Some(s) = mixer.sections.get_mut(i)
+            {
+                s.mix = (mixer.tracks != *base).then(|| mixer.tracks.clone());
+            }
+            mixer.tracks = base.clone();
+        }
         if let (Some(i), Some(base)) = (self.cue.active, &self.cue.base) {
             // While a cue plays, the live mixer is the cue's mix; the song keeps its own.
             if !self.session.tracks.is_empty()
@@ -1317,6 +1547,10 @@ impl StageWeaveApp {
     /// Drop the loaded stems and load the ones for the song's current model
     /// (if it has been split with it).
     pub fn reload_stems(&mut self, ctx: &egui::Context) {
+        self.leave_section();
+        if self.cue.active.is_some() {
+            self.exit_cue();
+        }
         if !self.session.tracks.is_empty() {
             self.pending_mixer = Some(SongMixer::capture(&self.session.tracks, self.master_db));
         }
@@ -1500,6 +1734,7 @@ impl StageWeaveApp {
             // Only the original mix is loaded.
             let master = 10f32.powf(self.master_db / 20.0);
             self.playback.set_mix(&[1.0], &[0.0], master);
+            self.playback.set_sections(&[], master);
             return;
         }
         let gains: Vec<f32> = (0..self.session.tracks.len())
@@ -1507,7 +1742,15 @@ impl StageWeaveApp {
             .collect();
         let pans: Vec<f32> = self.session.tracks.iter().map(|t| t.pan).collect();
         let master = 10f32.powf(self.master_db / 20.0);
-        self.playback.set_mix(&gains, &pans, master);
+        if self.section.current.is_some() {
+            // The strips show a section's mix: outside it the song's plays.
+            let (gains, pans) = self.stem_gains(&self.song_mix());
+            self.playback.set_mix(&gains, &pans, master);
+        } else {
+            self.playback.set_mix(&gains, &pans, master);
+        }
+        let schedule = self.section_schedule();
+        self.playback.set_sections(&schedule, master);
     }
 
     pub fn generate_lyrics(&mut self) {
@@ -2199,6 +2442,7 @@ impl StageWeaveApp {
                 self.exit_cue();
             }
         }
+        self.follow_sections();
         let dur = self.session.duration();
         if self.playback.is_playing() && self.position() >= dur {
             if self.loop_enabled {
@@ -2353,6 +2597,10 @@ impl StageWeaveApp {
         if in_song && self.tap_sync.is_none() && self.dialog.is_none() && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Q)) {
             self.cue_key();
         }
+        // S: section start / section end (playback carries on).
+        if in_song && self.tap_sync.is_none() && self.dialog.is_none() && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::S)) {
+            self.section_key();
+        }
         // E: previous line runs until the playhead.
         if in_song && self.tap_sync.is_none() && self.dialog.is_none() && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::E)) {
             self.lyric_extend_to_playhead();
@@ -2437,6 +2685,8 @@ impl StageWeaveApp {
                 self.dialog = None;
             } else if self.tap_sync.is_some() {
                 self.tap_sync = None;
+            } else if self.section.recording.is_some() {
+                self.section.recording = None;
             } else if self.cue.recording.is_some() {
                 self.cue.recording = None;
             } else if self.cue.active.is_some() {
@@ -2718,6 +2968,75 @@ mod history_tests {
         assert!(a.cue.active.is_none());
         a.activate_cue(0);
         assert!(a.session.tracks[0].muted, "cue mix applied again");
+    }
+
+    #[test]
+    fn s_marks_a_section_that_plays_through_with_its_own_mix() {
+        let a = app_with_stems();
+        let mut h = n_harness(a);
+        h.state_mut().seek(10.0);
+        h.key_press(egui::Key::S);
+        h.run_steps(1);
+        assert_eq!(h.state().section.recording, Some(10.0));
+        h.state_mut().seek(20.0);
+        h.key_press(egui::Key::S);
+        h.run_steps(1);
+        let a = h.state_mut();
+        assert_eq!(a.session.sections.len(), 1);
+        assert_eq!((a.session.sections[0].start, a.session.sections[0].end), (10.0, 20.0));
+        assert!((a.position() - 20.0).abs() < 0.05, "no jump, no loop");
+        assert!(a.cue.active.is_none());
+
+        // Inside the section, muting the drums belongs to the section.
+        a.seek(15.0);
+        a.follow_sections();
+        assert_eq!(a.section.current, Some(0));
+        a.session.tracks[1].muted = true;
+        a.sync_mix();
+        let m = saved_mixer(a);
+        assert!(!m.tracks[1].muted, "song mix unchanged");
+        assert!(m.sections[0].mix.as_ref().unwrap()[1].muted, "section keeps its mute");
+        let sched = a.section_schedule();
+        assert_eq!(sched.len(), 1);
+        assert_eq!((sched[0].start, sched[0].end), (10.0, 20.0));
+        assert_eq!(sched[0].gains[1], 0.0, "drums silent in the section");
+        assert!(sched[0].gains[0] > 0.0);
+
+        // Leaving it puts the song's mix back on the strips.
+        a.seek(25.0);
+        a.follow_sections();
+        assert!(a.section.current.is_none());
+        assert!(!a.session.tracks[1].muted);
+        assert!(a.session.sections[0].mix.as_ref().unwrap()[1].muted);
+        assert_eq!(a.section_schedule().len(), 1, "still scheduled outside it");
+
+        // A looping cue's mix wins over sections.
+        a.session.cues.push(crate::model::Cue { name: "Cue 1".into(), start: 12.0, end: 14.0, mix: None });
+        a.activate_cue(0);
+        a.follow_sections();
+        assert!(a.section.current.is_none());
+        assert!(a.section_schedule().is_empty());
+        a.exit_cue();
+
+        // Editing from the menu while elsewhere; back to the song mix drops it.
+        a.edit_section_stem(0, StemKind::Vocals, |t| t.gain_db = -6.0);
+        assert_eq!(a.session.sections[0].mix.as_ref().unwrap()[0].gain_db, -6.0);
+        a.reset_section_mix(0);
+        assert!(a.session.sections[0].mix.is_none());
+        assert!(a.section_schedule().is_empty());
+    }
+
+    #[test]
+    fn esc_cancels_marking_a_section() {
+        let mut h = n_harness(app_with_stems());
+        h.state_mut().seek(4.0);
+        h.key_press(egui::Key::S);
+        h.run_steps(1);
+        assert!(h.state().section.recording.is_some());
+        h.key_press(egui::Key::Escape);
+        h.run_steps(1);
+        assert!(h.state().section.recording.is_none());
+        assert!(h.state().session.sections.is_empty());
     }
 
     #[test]

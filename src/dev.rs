@@ -9,7 +9,8 @@
 //! * `STAGEWEAVE_SHOW_MODELS=1` / `STAGEWEAVE_SHOW_SETTINGS=1` open those windows at startup.
 //! * `STAGEWEAVE_INSTALL=1` installs the separation engine if it is missing.
 //! * `STAGEWEAVE_BG=Clouds` uses a starter background; `STAGEWEAVE_CUE=40,60`
-//!   adds a looping cue with drums muted; `STAGEWEAVE_LAYOUT=lyrics|perform`
+//!   adds a looping cue with drums muted; `STAGEWEAVE_SECTION=start,end` adds
+//!   sections (a Chorus with its own mix); `STAGEWEAVE_LAYOUT=lyrics|perform`
 //!   picks the workspace (for README screenshots).
 //! * `STAGEWEAVE_SEARCH=<query>` opens ⌘K search, `STAGEWEAVE_HOME_QUERY=<query>`
 //!   filters the home screen, `STAGEWEAVE_LIBRARY=<project>` opens that project's
@@ -253,6 +254,12 @@ pub fn tick(app: &mut StageWeaveApp, ctx: &egui::Context) {
             app.ai_panel.open = true;
             app.toggle_play();
         }
+        // STAGEWEAVE_PANEL=song: the left panel's Song tab (models, stems).
+        if std::env::var("STAGEWEAVE_PANEL").as_deref() == Ok("song") {
+            app.project_tab = 1;
+            app.selected_track = Some(1);
+            app.editor_tab = 1;
+        }
         if std::env::var("STAGEWEAVE_LYRIC_LIST").is_ok() {
             app.toggle_play(); // pause
             app.lyric_clip_select(2);
@@ -285,6 +292,20 @@ pub fn tick(app: &mut StageWeaveApp, ctx: &egui::Context) {
             if let Some(t) = app.session.tracks.iter_mut().find(|t| t.kind == crate::model::StemKind::Drums) {
                 t.muted = true;
             }
+        }
+        // STAGEWEAVE_SECTION=start,end: a "Chorus" section with drums muted
+        // and bass down, plus a plain "Verse" before it.
+        if let Some((start, end)) = std::env::var("STAGEWEAVE_SECTION").ok().and_then(|v| {
+            let (a, b) = v.split_once(',')?;
+            Some((a.trim().parse::<f64>().ok()?, b.trim().parse::<f64>().ok()?))
+        }) {
+            use crate::model::{Section, StemKind, insert_section};
+            let verse = Section { name: "Verse".into(), start: (start - 30.0).max(0.0), end: start, mix: None };
+            insert_section(&mut app.session.sections, verse);
+            let i = insert_section(&mut app.session.sections, Section { name: "Chorus".into(), start, end, mix: None });
+            app.edit_section_stem(i, StemKind::Drums, |t| t.muted = true);
+            app.edit_section_stem(i, StemKind::Bass, |t| t.gain_db = -8.0);
+            app.seek((start + end) / 2.0);
         }
         if std::env::var("STAGEWEAVE_LYRIC_EDIT").is_ok() {
             app.seek(61.0);

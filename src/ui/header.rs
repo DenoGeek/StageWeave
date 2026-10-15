@@ -210,6 +210,11 @@ fn menus(app: &mut StageWeaveApp, ui: &mut Ui) {
                 if ui.add_enabled(app.cue.active.is_some(), egui::Button::new("Exit Cue").shortcut_text("Esc")).clicked() {
                     app.exit_cue();
                 }
+                ui.separator();
+                let mark = if app.section.recording.is_some() { "End Section" } else { "Mark Section Start" };
+                if ui.add(egui::Button::new(mark).shortcut_text("S")).clicked() {
+                    app.section_key();
+                }
             });
         });
         ui.menu_button("Window", |ui| {
@@ -240,6 +245,7 @@ fn menus(app: &mut StageWeaveApp, ui: &mut Ui) {
                 ("N", "New lyric line at the playhead"),
                 ("E", "Stretch the previous line to the playhead"),
                 ("Q", "Mark a cue start / close it and loop"),
+                ("S", "Mark a section start / close it (own mix, keeps playing)"),
                 ("Esc", "Exit the cue"),
                 ("Enter", "Stamp line (tap sync)"),
                 ("⌘ + scroll", "Zoom timeline"),

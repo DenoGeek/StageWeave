@@ -242,6 +242,93 @@ pub fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color3
     }
 }
 
+/// An instrument icon for a stem (microphone, drum, keys…), drawn to fit
+/// `rect` in `color`.
+pub fn paint_stem_icon(painter: &egui::Painter, rect: Rect, kind: crate::model::StemKind, color: Color32) {
+    use crate::model::StemKind;
+    let c = rect.center();
+    let s = rect.width().min(rect.height()) * 0.5;
+    let w = (0.16 * s).max(1.0);
+    let stroke = Stroke::new(w, color);
+    let at = |x: f32, y: f32| c + vec2(x * s, y * s);
+    // Points on an ellipse arc (angles in turns of a circle, y down).
+    let arc = |cx: f32, cy: f32, rx: f32, ry: f32, from: f32, to: f32| -> Vec<Pos2> {
+        (0..=16)
+            .map(|k| {
+                let a = (from + (to - from) * k as f32 / 16.0) * std::f32::consts::TAU;
+                at(cx + rx * a.cos(), cy + ry * a.sin())
+            })
+            .collect()
+    };
+    match kind {
+        StemKind::Vocals => {
+            // Microphone: capsule, cradle, stand.
+            painter.rect_filled(Rect::from_min_max(at(-0.3, -0.9), at(0.3, 0.15)), 0.3 * s, color);
+            painter.add(Shape::line(arc(0.0, -0.2, 0.55, 0.6, 0.0, 0.5), stroke));
+            painter.line_segment([at(0.0, 0.4), at(0.0, 0.78)], stroke);
+            painter.line_segment([at(-0.35, 0.82), at(0.35, 0.82)], stroke);
+        }
+        StemKind::Drums => {
+            // Drum shell with two sticks crossing above it.
+            painter.add(Shape::closed_line(arc(0.0, 0.0, 0.75, 0.24, 0.0, 1.0), stroke));
+            painter.line_segment([at(-0.75, 0.0), at(-0.75, 0.55)], stroke);
+            painter.line_segment([at(0.75, 0.0), at(0.75, 0.55)], stroke);
+            painter.add(Shape::line(arc(0.0, 0.55, 0.75, 0.24, 0.0, 0.5), stroke));
+            for d in [-1.0, 1.0] {
+                painter.line_segment([at(0.1 * d, -0.1), at(0.7 * d, -0.85)], stroke);
+                painter.circle_filled(at(0.7 * d, -0.85), 0.13 * s, color);
+            }
+        }
+        StemKind::Bass => {
+            // Bass clef.
+            painter.circle_filled(at(-0.5, -0.25), 0.17 * s, color);
+            let curve = [(-0.5, -0.25), (-0.4, -0.55), (-0.1, -0.72), (0.22, -0.62), (0.4, -0.3), (0.32, 0.08), (0.0, 0.42), (-0.5, 0.75)];
+            painter.add(Shape::line(curve.iter().map(|&(x, y)| at(x, y)).collect(), Stroke::new(w * 1.2, color)));
+            painter.circle_filled(at(0.68, -0.38), 0.11 * s, color);
+            painter.circle_filled(at(0.68, 0.02), 0.11 * s, color);
+        }
+        StemKind::Guitar => {
+            // Body (two lobes), neck and headstock, on a diagonal.
+            painter.circle_filled(at(-0.38, 0.38), 0.44 * s, color);
+            painter.circle_filled(at(-0.05, 0.05), 0.32 * s, color);
+            painter.line_segment([at(-0.05, 0.05), at(0.62, -0.62)], Stroke::new(0.2 * s, color));
+            painter.line_segment([at(0.58, -0.58), at(0.85, -0.85)], Stroke::new(0.36 * s, color));
+        }
+        StemKind::Piano => {
+            // Four white keys and two black ones.
+            let body = Rect::from_min_max(at(-0.85, -0.6), at(0.85, 0.6));
+            painter.rect_stroke(body, 0.12 * s, stroke, egui::StrokeKind::Inside);
+            for x in [-0.425, 0.0, 0.425] {
+                painter.line_segment([at(x, -0.6), at(x, 0.6)], Stroke::new(w * 0.8, color));
+            }
+            for x in [-0.425, 0.0] {
+                painter.rect_filled(Rect::from_min_max(at(x - 0.13, -0.6), at(x + 0.13, 0.12)), 0.0, color);
+            }
+        }
+        StemKind::Other => {
+            // A sparkle: two thin diamonds.
+            painter.add(Shape::convex_polygon(vec![at(0.0, -0.9), at(0.2, 0.0), at(0.0, 0.9), at(-0.2, 0.0)], color, Stroke::NONE));
+            painter.add(Shape::convex_polygon(vec![at(-0.9, 0.0), at(0.0, -0.2), at(0.9, 0.0), at(0.0, 0.2)], color, Stroke::NONE));
+        }
+        StemKind::Instrumental => {
+            // Two beamed eighth notes.
+            painter.circle_filled(at(-0.48, 0.55), 0.24 * s, color);
+            painter.circle_filled(at(0.42, 0.4), 0.24 * s, color);
+            painter.line_segment([at(-0.27, 0.52), at(-0.27, -0.55)], stroke);
+            painter.line_segment([at(0.63, 0.37), at(0.63, -0.72)], stroke);
+            painter.line_segment([at(-0.27, -0.55), at(0.63, -0.72)], Stroke::new(0.24 * s, color));
+        }
+    }
+}
+
+/// A stem's icon on a rounded badge in its colour (dimmed when silent).
+pub fn stem_badge(ui: &mut Ui, size: f32, kind: crate::model::StemKind, color: Color32, audible: bool) -> egui::Response {
+    let (r, resp) = ui.allocate_exact_size(vec2(size, size), egui::Sense::hover());
+    ui.painter().rect_filled(r, (size * 0.2).round(), color.gamma_multiply(if audible { 1.0 } else { 0.35 }));
+    paint_stem_icon(ui.painter(), r.shrink(size * 0.18), kind, Color32::BLACK);
+    resp
+}
+
 /// A small check mark.
 pub fn paint_check(painter: &egui::Painter, rect: Rect, color: Color32) {
     let s = rect.width().min(rect.height());

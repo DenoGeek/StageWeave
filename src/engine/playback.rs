@@ -16,10 +16,19 @@ use crate::model::AudioBuffer;
 
 use super::PlaybackEngine;
 
+/// A section's target (left, right) gain per track.
+struct SectionGains {
+    start: f64,
+    end: f64,
+    gains: Vec<[f32; 2]>,
+}
+
 struct Shared {
     tracks: ArcSwap<Vec<Arc<AudioBuffer>>>,
     /// Target (left, right) gain per track, master and pan included.
     gains: ArcSwap<Vec<[f32; 2]>>,
+    /// Sections whose own gains replace `gains` while the playhead is inside.
+    sections: ArcSwap<Vec<SectionGains>>,
     playing: AtomicBool,
     /// Pending seek in seconds (f64 bits), NaN when none.
     seek_to: AtomicU64,
@@ -66,6 +75,7 @@ impl CpalPlayback {
         let shared = Arc::new(Shared {
             tracks: ArcSwap::from_pointee(Vec::new()),
             gains: ArcSwap::from_pointee(Vec::new()),
+            sections: ArcSwap::from_pointee(Vec::new()),
             playing: AtomicBool::new(false),
             seek_to: AtomicU64::new(f64::NAN.to_bits()),
             pos: AtomicU64::new(0f64.to_bits()),
@@ -157,11 +167,20 @@ impl Mixer {
         }
         let tracks = shared.tracks.load();
         let gains = shared.gains.load();
-        self.mix(&tracks, &gains, shared.loop_region(), out);
+        let sections = shared.sections.load();
+        self.mix(&tracks, &gains, &sections, shared.loop_region(), out);
         shared.publish(self.t);
     }
 
-    fn mix(&mut self, tracks: &[Arc<AudioBuffer>], gains: &[[f32; 2]], region: Option<(f64, f64)>, out: &mut [f32]) {
+    fn mix(
+        &mut self,
+        tracks: &[Arc<AudioBuffer>],
+        base: &[[f32; 2]],
+        sections: &[SectionGains],
+        region: Option<(f64, f64)>,
+        out: &mut [f32],
+    ) {
+        let gains = base;
         if self.current.len() != tracks.len() {
             // Only happens when the track list changes.
             self.current = gains.iter().take(tracks.len()).copied().collect();
@@ -170,6 +189,7 @@ impl Mixer {
         let dt = 1.0 / self.rate;
         for frame in out.chunks_mut(2) {
             let (mut l, mut r) = (0.0f32, 0.0f32);
+            let gains = sections.iter().find(|s| self.t >= s.start && self.t < s.end).map_or(gains, |s| &s.gains[..]);
             for (i, buf) in tracks.iter().enumerate() {
                 let target = gains.get(i).copied().unwrap_or([0.0; 2]);
                 let g = &mut self.current[i];
@@ -207,6 +227,10 @@ fn sample_at(buf: &AudioBuffer, t: f64) -> (f32, f32) {
     let Some(a) = d.get(i * 2..i * 2 + 2) else { return (0.0, 0.0) };
     let b = d.get(i * 2 + 2..i * 2 + 4).unwrap_or(a);
     (a[0] + (b[0] - a[0]) * frac, a[1] + (b[1] - a[1]) * frac)
+}
+
+fn lr_gains(gains: &[f32], pans: &[f32], master: f32) -> Vec<[f32; 2]> {
+    gains.iter().zip(pans.iter().chain(std::iter::repeat(&0.0))).map(|(&g, &p)| pan_gains(g * master, p)).collect()
 }
 
 /// Constant-power pan law, normalised so centre = unity on both sides.
@@ -258,12 +282,14 @@ impl PlaybackEngine for CpalPlayback {
         self.shared.tracks.store(Arc::new(tracks));
     }
     fn set_mix(&mut self, gains: &[f32], pans: &[f32], master: f32) {
-        let lr = gains
+        self.shared.gains.store(Arc::new(lr_gains(gains, pans, master)));
+    }
+    fn set_sections(&mut self, sections: &[super::SectionMix], master: f32) {
+        let s = sections
             .iter()
-            .zip(pans.iter().chain(std::iter::repeat(&0.0)))
-            .map(|(&g, &p)| pan_gains(g * master, p))
+            .map(|s| SectionGains { start: s.start, end: s.end, gains: lr_gains(&s.gains, &s.pans, master) })
             .collect();
-        self.shared.gains.store(Arc::new(lr));
+        self.shared.sections.store(Arc::new(s));
     }
     fn describe(&self) -> String {
         format!("{} · {:.1} kHz", self.device_name, self.device_rate as f32 / 1000.0)
@@ -293,7 +319,7 @@ mod tests {
         let tracks = vec![constant(0.25, 100), constant(0.5, 100)];
         let gains = vec![[1.0, 1.0], [0.0, 0.0]]; // second track muted
         let mut out = vec![0.0; 20];
-        m.mix(&tracks, &gains, None, &mut out);
+        m.mix(&tracks, &gains, &[], None, &mut out);
         assert!(out.iter().all(|s| (s - 0.25).abs() < 1e-6));
         assert!((m.t - 0.1).abs() < 1e-9);
     }
@@ -303,11 +329,11 @@ mod tests {
         let mut m = Mixer::new(100);
         m.t = 0.25;
         let mut out = vec![0.0; 2 * 10]; // 0.1 s
-        m.mix(&[constant(0.5, 100)], &[[1.0, 1.0]], Some((0.1, 0.3)), &mut out);
+        m.mix(&[constant(0.5, 100)], &[[1.0, 1.0]], &[], Some((0.1, 0.3)), &mut out);
         assert!((m.t - 0.15).abs() < 1e-9, "wrapped back to the loop start: {}", m.t);
         // Far past the end (user seeked out of the cue): no wrap.
         m.t = 0.9;
-        m.mix(&[constant(0.5, 100)], &[[1.0, 1.0]], Some((0.1, 0.3)), &mut out);
+        m.mix(&[constant(0.5, 100)], &[[1.0, 1.0]], &[], Some((0.1, 0.3)), &mut out);
         assert!((m.t - 1.0).abs() < 1e-9);
     }
 
@@ -317,7 +343,26 @@ mod tests {
         m.ramp = 1.0;
         m.t = 5.0;
         let mut out = vec![1.0; 4];
-        m.mix(&[constant(0.5, 10)], &[[1.0, 1.0]], None, &mut out);
+        m.mix(&[constant(0.5, 10)], &[[1.0, 1.0]], &[], None, &mut out);
         assert!(out.iter().all(|&s| s == 0.0));
+    }
+
+    #[test]
+    fn a_section_switches_the_mix_on_the_exact_sample() {
+        let mut m = Mixer::new(100);
+        m.ramp = 1.0;
+        let tracks = vec![constant(0.25, 400), constant(0.5, 400)];
+        let base = vec![[1.0, 1.0], [1.0, 1.0]];
+        // Second track muted from 1.05 s to 2.0 s (starts mid-buffer).
+        let sections = vec![SectionGains { start: 1.05, end: 2.0, gains: vec![[1.0, 1.0], [0.0, 0.0]] }];
+        m.t = 1.0;
+        let mut out = vec![0.0; 2 * 10]; // 1.00 .. 1.10
+        m.mix(&tracks, &base, &sections, None, &mut out);
+        assert!(out[..10].iter().all(|s| (s - 0.75).abs() < 1e-6), "before the section: {:?}", &out[..10]);
+        assert!(out[10..].iter().all(|s| (s - 0.25).abs() < 1e-6), "inside the section: {:?}", &out[10..]);
+        m.t = 1.95;
+        m.mix(&tracks, &base, &sections, None, &mut out); // 1.95 .. 2.05
+        assert!(out[..10].iter().all(|s| (s - 0.25).abs() < 1e-6));
+        assert!(out[10..].iter().all(|s| (s - 0.75).abs() < 1e-6), "back to the song's mix after it");
     }
 }

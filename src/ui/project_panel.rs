@@ -335,8 +335,8 @@ fn separation(app: &mut StageWeaveApp, ui: &mut Ui) {
         }
         p.galley(pill.min + vec2(5.0 + icon_w, 2.0), g, tag_color);
         for (k, kind) in model.stems.iter().rev().enumerate() {
-            let c = pos2(rect.right() - 14.0 - k as f32 * 11.0, rect.bottom() - 13.0);
-            p.circle_filled(c, 4.0, kind.color());
+            let c = pos2(rect.right() - 15.0 - k as f32 * 13.0, rect.bottom() - 13.0);
+            super::widgets::paint_stem_icon(&p, egui::Rect::from_center_size(c, vec2(10.0, 10.0)), *kind, kind.color());
         }
         if resp.clicked() && !selected {
             let key = app.models[i].key();
@@ -428,7 +428,7 @@ fn stem_bin(app: &mut StageWeaveApp, ui: &mut Ui) {
         }
         let icon_r = Rect::from_center_size(pos2(rect.left() + 18.0, rect.center().y), vec2(24.0, 24.0));
         p.rect_filled(icon_r, 5.0, t.color.gamma_multiply(if audible { 0.9 } else { 0.3 }));
-        p.text(icon_r.center(), Align2::CENTER_CENTER, t.kind.icon(), FontId::proportional(13.0), Color32::BLACK);
+        super::widgets::paint_stem_icon(p, icon_r.shrink(5.0), t.kind, Color32::BLACK);
         let text_c = if audible { Color32::WHITE } else { TEXT_FAINT };
         p.text(pos2(icon_r.right() + 10.0, rect.top() + 12.0), Align2::LEFT_CENTER, &t.name, FontId::proportional(12.5), text_c);
         let sub = if let Some(path) = &t.path {

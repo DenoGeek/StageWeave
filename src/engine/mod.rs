@@ -116,6 +116,15 @@ pub trait StemSplitter: Send + Sync {
 }
 
 /// Plays all tracks in sync. The UI reads `position()` every frame.
+/// A section's mix as the engine sees it (same shape as `set_mix`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SectionMix {
+    pub start: f64,
+    pub end: f64,
+    pub gains: Vec<f32>,
+    pub pans: Vec<f32>,
+}
+
 pub trait PlaybackEngine {
     fn play(&mut self);
     fn pause(&mut self);
@@ -128,6 +137,9 @@ pub trait PlaybackEngine {
     fn set_mix(&mut self, gains: &[f32], pans: &[f32], master: f32);
     /// Loop `start..end` sample-accurately while playing (`None` = off).
     fn set_loop(&mut self, region: Option<(f64, f64)>);
+    /// Time ranges that play with their own gains instead of `set_mix`'s,
+    /// switched sample-accurately by the audio thread (sorted, no overlaps).
+    fn set_sections(&mut self, sections: &[SectionMix], master: f32);
     /// Human readable output description for the status bar.
     fn describe(&self) -> String;
 }

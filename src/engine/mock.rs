@@ -251,6 +251,7 @@ impl PlaybackEngine for MockPlayback {
     }
     fn set_tracks(&mut self, _tracks: Vec<Arc<AudioBuffer>>) {}
     fn set_mix(&mut self, _gains: &[f32], _pans: &[f32], _master: f32) {}
+    fn set_sections(&mut self, _sections: &[super::SectionMix], _master: f32) {}
     fn describe(&self) -> String {
         "Silent preview clock".into()
     }

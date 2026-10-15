@@ -424,9 +424,7 @@ fn inspector(app: &mut StageWeaveApp, ui: &mut Ui) {
     let t = &mut app.session.tracks[i];
 
     ui.horizontal(|ui| {
-        let (r, _) = ui.allocate_exact_size(vec2(34.0, 34.0), Sense::hover());
-        ui.painter().rect_filled(r, 7.0, t.color);
-        ui.painter().text(r.center(), Align2::CENTER_CENTER, t.kind.icon(), FontId::proportional(16.0), Color32::BLACK);
+        super::widgets::stem_badge(ui, 34.0, t.kind, t.color, true);
         ui.vertical(|ui| {
             ui.add(egui::TextEdit::singleline(&mut t.name).font(egui::TextStyle::Heading).frame(egui::Frame::NONE).desired_width(f32::INFINITY));
             ui.label(RichText::new(format!("{} stem  ·  {}", t.kind.label(), if audible { "audible" } else { "silent" })).size(11.0).color(TEXT_DIM));

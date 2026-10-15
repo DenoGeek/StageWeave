@@ -92,6 +92,30 @@ pub fn draw(app: &mut StageWeaveApp, ui: &mut Ui) {
 /// way out), or the song's cues to jump into.
 fn cues(app: &mut StageWeaveApp, ui: &mut Ui) {
     ui.spacing_mut().item_spacing.x = 6.0;
+    if let Some(start) = app.section.recording {
+        let pulse = 0.5 + 0.5 * (ui.input(|i| i.time) * 4.0).sin().abs() as f32;
+        let (dot, _) = ui.allocate_exact_size(vec2(10.0, 10.0), egui::Sense::hover());
+        ui.painter().circle_filled(dot.center(), 5.0, DANGER.gamma_multiply(pulse));
+        ui.label(RichText::new(format!("Section from {}", timecode(start))).size(12.0).color(Color32::WHITE))
+            .on_hover_text("Press S again where the section ends. Playback keeps going. (Esc cancels)");
+        ui.label(RichText::new("S to close").size(11.0).color(TEXT_FAINT));
+        ui.ctx().request_repaint();
+        return;
+    }
+    // The section playing now (its mix is on).
+    let mut in_section = false;
+    if app.cue.active.is_none()
+        && let Some(s) = app.section.current.and_then(|i| app.session.sections.get(i))
+    {
+        let chip = egui::Button::new(RichText::new(&s.name).size(11.5).color(Color32::BLACK))
+            .fill(SECTION)
+            .stroke(Stroke::NONE)
+            .corner_radius(10)
+            .min_size(vec2(24.0, 20.0))
+            .sense(egui::Sense::hover());
+        ui.add(chip).on_hover_text(format!("Section {}: {} – {}. Its own mix is playing.", s.name, timecode(s.start), timecode(s.end)));
+        in_section = true;
+    }
     if let Some(start) = app.cue.recording {
         let pulse = 0.5 + 0.5 * (ui.input(|i| i.time) * 4.0).sin().abs() as f32;
         let (dot, _) = ui.allocate_exact_size(vec2(10.0, 10.0), egui::Sense::hover());
@@ -122,8 +146,13 @@ fn cues(app: &mut StageWeaveApp, ui: &mut Ui) {
         return;
     }
     if app.session.cues.is_empty() {
-        ui.label(RichText::new("Q: mark a cue").size(11.0).color(TEXT_FAINT))
-            .on_hover_text("While playing, press Q where a section starts and Q again where it ends: it loops until you exit.");
+        if in_section {
+            return;
+        }
+        ui.label(RichText::new("Q: cue loop · S: section").size(11.0).color(TEXT_FAINT)).on_hover_text(
+            "While playing, press Q where a part starts and Q again where it ends: it loops until you exit.\n\
+             Press S and S again to mark a section instead: playback carries on, with the section's own mix inside it.",
+        );
         return;
     }
     ui.label(RichText::new("Cues").size(11.0).color(TEXT_FAINT));

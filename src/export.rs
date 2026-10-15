@@ -42,8 +42,13 @@ impl Default for ExportPanel {
     }
 }
 
-/// Stems with their stereo gains, and the master gain.
-pub type Mixdown = (Vec<(Arc<AudioBuffer>, [f32; 2])>, f32);
+/// Stems with their stereo gains, the master gain, and sections that switch
+/// to their own gains (`start`, `end`, one gain pair per stem).
+pub struct Mixdown {
+    pub tracks: Vec<(Arc<AudioBuffer>, [f32; 2])>,
+    pub master: f32,
+    pub sections: Vec<(f64, f64, Vec<[f32; 2]>)>,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BgKind {
@@ -149,9 +154,9 @@ pub fn ffmpeg_args(spec: &ExportSpec, out: &Path) -> Vec<String> {
 }
 
 fn run(spec: &ExportSpec, cancel: &AtomicBool, report: &dyn Fn(f32, &str)) -> Result<(), String> {
-    if let Some((tracks, master)) = &spec.mix {
+    if let Some(Mixdown { tracks, master, sections }) = &spec.mix {
         report(0.0, "Mixing the stems…");
-        write_mixdown(tracks, *master, &spec.audio)?;
+        write_mixdown(tracks, *master, sections, &spec.audio)?;
     }
     report(0.0, "Starting the renderer…");
     let mut renderer = FrameRenderer::new(spec.width, spec.height)?;
@@ -218,7 +223,12 @@ fn timecode(t: f64) -> String {
 // --------------------------------------------------------------------------- audio
 
 /// Mix stems with per-track stereo gains into a 16-bit WAV.
-pub fn write_mixdown(tracks: &[(Arc<AudioBuffer>, [f32; 2])], master: f32, dest: &Path) -> Result<(), String> {
+pub fn write_mixdown(
+    tracks: &[(Arc<AudioBuffer>, [f32; 2])],
+    master: f32,
+    sections: &[(f64, f64, Vec<[f32; 2]>)],
+    dest: &Path,
+) -> Result<(), String> {
     let rate = tracks.first().map_or(44_100, |(b, _)| b.sample_rate);
     let frames = tracks.iter().map(|(b, _)| b.frames()).max().unwrap_or(0);
     let mut f = std::io::BufWriter::new(std::fs::File::create(dest).map_err(|e| e.to_string())?);
@@ -240,7 +250,10 @@ pub fn write_mixdown(tracks: &[(Arc<AudioBuffer>, [f32; 2])], master: f32, dest:
     let mut chunk = Vec::with_capacity(64 * 1024);
     for i in 0..frames {
         let (mut l, mut r) = (0.0f32, 0.0f32);
-        for (buf, [gl, gr]) in tracks {
+        let t = i as f64 / rate as f64;
+        let section = sections.iter().find(|(a, b, _)| t >= *a && t < *b);
+        for (k, (buf, gain)) in tracks.iter().enumerate() {
+            let [gl, gr] = section.and_then(|(_, _, g)| g.get(k).copied()).unwrap_or(*gain);
             if let Some(s) = buf.data.get(i * 2..i * 2 + 2) {
                 l += s[0] * gl;
                 r += s[1] * gr;
@@ -410,7 +423,7 @@ mod tests {
     fn mixdown_applies_gains() {
         let buf = |v: f32| Arc::new(AudioBuffer { sample_rate: 8000, data: vec![v; 16] });
         let dest = std::env::temp_dir().join(format!("mk-mix-{}.wav", std::process::id()));
-        write_mixdown(&[(buf(0.5), [1.0, 0.0]), (buf(0.25), [1.0, 1.0])], 1.0, &dest).unwrap();
+        write_mixdown(&[(buf(0.5), [1.0, 0.0]), (buf(0.25), [1.0, 1.0])], 1.0, &[], &dest).unwrap();
         let bytes = std::fs::read(&dest).unwrap();
         let _ = std::fs::remove_file(&dest);
         assert_eq!(bytes.len(), 44 + 8 * 4);
@@ -418,6 +431,20 @@ mod tests {
         let r = i16::from_le_bytes([bytes[46], bytes[47]]);
         assert_eq!(l, (0.75 * 32767.0) as i16);
         assert_eq!(r, (0.25 * 32767.0) as i16);
+    }
+
+    #[test]
+    fn mixdown_follows_sections() {
+        // 8 frames at 8 Hz; the second stem is muted from 0.5 s.
+        let buf = |v: f32| Arc::new(AudioBuffer { sample_rate: 8, data: vec![v; 16] });
+        let dest = std::env::temp_dir().join(format!("mk-mix-sec-{}.wav", std::process::id()));
+        let sections = vec![(0.5, 2.0, vec![[1.0, 1.0], [0.0, 0.0]])];
+        write_mixdown(&[(buf(0.5), [1.0, 1.0]), (buf(0.25), [1.0, 1.0])], 1.0, &sections, &dest).unwrap();
+        let bytes = std::fs::read(&dest).unwrap();
+        let _ = std::fs::remove_file(&dest);
+        let left = |frame: usize| i16::from_le_bytes([bytes[44 + frame * 4], bytes[45 + frame * 4]]);
+        assert_eq!(left(3), (0.75 * 32767.0) as i16, "before the section");
+        assert_eq!(left(4), (0.5 * 32767.0) as i16, "inside the section");
     }
 
     /// Needs a GPU: `cargo test renders_a_frame -- --ignored`
@@ -469,7 +496,7 @@ mod tests {
                 height: 720,
                 fps: 25,
                 audio: out_dir.join(format!("mix-{name}.wav")),
-                mix: Some((vec![(tone.clone(), [1.0, 1.0])], 1.0)),
+                mix: Some(Mixdown { tracks: vec![(tone.clone(), [1.0, 1.0])], master: 1.0, sections: Vec::new() }),
                 background: bg,
                 ffmpeg: "ffmpeg".into(),
                 dest: dest.clone(),
