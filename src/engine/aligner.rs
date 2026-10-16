@@ -30,7 +30,7 @@ impl LyricAligner for NaiveAligner {
             .zip(weights)
             .map(|(text, w)| {
                 let len = span * w / total;
-                let line = LyricLine { text: text.clone(), start: t, end: t + len };
+                let line = LyricLine::new(text.clone(), t, t + len);
                 t += len;
                 line
             })

@@ -172,6 +172,47 @@ pub struct LyricLine {
     pub text: String,
     pub start: f64,
     pub end: f64,
+    /// Word timings from forced alignment, in order. Only kept while they
+    /// still match the line's text (see `Lyrics::tidy_words`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub words: Vec<LyricWord>,
+}
+
+/// One word's timing inside a line (seconds, song time).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct LyricWord {
+    pub text: String,
+    pub start: f64,
+    pub end: f64,
+}
+
+impl LyricLine {
+    pub fn new(text: impl Into<String>, start: f64, end: f64) -> Self {
+        Self { text: text.into(), start, end, words: Vec::new() }
+    }
+
+    /// Do the word timings still describe this line's text?
+    fn words_match(&self) -> bool {
+        self.text.split_whitespace().eq(self.words.iter().map(|w| w.text.as_str()))
+    }
+
+    /// Keep word timings honest after an edit: clear them if the text no
+    /// longer matches, else clamp them inside the line in order.
+    pub fn fit_words(&mut self) {
+        if self.words.is_empty() {
+            return;
+        }
+        if !self.words_match() {
+            self.words.clear();
+            return;
+        }
+        let mut floor = self.start;
+        for w in &mut self.words {
+            w.start = w.start.clamp(floor, self.end);
+            w.end = w.end.clamp(w.start, self.end);
+            floor = w.start;
+        }
+    }
 }
 
 /// Split a lyric line into the sung part and a translation written in
@@ -333,6 +374,13 @@ impl Lyrics {
         !self.lines.is_empty()
     }
 
+    /// Drop or clamp word timings that edits made stale (cheap; run before saving).
+    pub fn tidy_words(&mut self) {
+        for l in &mut self.lines {
+            l.fit_words();
+        }
+    }
+
     pub fn line_at(&self, t: f64) -> Option<usize> {
         self.lines.iter().position(|l| t >= l.start && t < l.end)
     }
@@ -388,7 +436,7 @@ impl Lyrics {
         if i > 0 && self.lines[i - 1].end > t {
             self.lines[i - 1].end = t.max(self.lines[i - 1].start + Self::MIN_LEN);
         }
-        self.lines.insert(i, LyricLine { text: String::new(), start: t, end });
+        self.lines.insert(i, LyricLine::new(String::new(), t, end));
         i
     }
 
@@ -405,7 +453,7 @@ impl Lyrics {
             self.lines[i].start = mid;
             (line.start, mid)
         };
-        self.lines.insert(i, LyricLine { text: String::new(), start, end: end.max(start + Self::MIN_LEN) });
+        self.lines.insert(i, LyricLine::new(String::new(), start, end.max(start + Self::MIN_LEN)));
         i
     }
 
@@ -421,7 +469,7 @@ impl Lyrics {
             self.lines[i].end = mid;
             (mid, line.end)
         };
-        self.lines.insert(i + 1, LyricLine { text: String::new(), start, end: end.max(start + Self::MIN_LEN) });
+        self.lines.insert(i + 1, LyricLine::new(String::new(), start, end.max(start + Self::MIN_LEN)));
         i + 1
     }
 
@@ -435,8 +483,19 @@ impl Lyrics {
         let frac = (t - line.start) / (line.end - line.start);
         let cut = ((words.len() as f64 * frac).round() as usize).clamp(1.min(words.len()), words.len().saturating_sub(1).max(1));
         let (a, b) = words.split_at(cut.min(words.len()));
-        self.lines[i] = LyricLine { text: a.join(" "), start: line.start, end: t };
-        self.lines.insert(i + 1, LyricLine { text: b.join(" "), start: t, end: line.end });
+        let mut first = LyricLine::new(a.join(" "), line.start, t);
+        let mut second = LyricLine::new(b.join(" "), t, line.end);
+        if line.words_match() {
+            // Timed words go to the side they're sung on; the cut follows them.
+            let n = line.words.iter().filter(|w| w.start < t).count().clamp(1, line.words.len().saturating_sub(1).max(1));
+            let (wa, wb) = line.words.split_at(n.min(line.words.len()));
+            first = LyricLine { text: wa.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" "), words: wa.to_vec(), ..first };
+            second = LyricLine { text: wb.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" "), words: wb.to_vec(), ..second };
+            first.fit_words();
+            second.fit_words();
+        }
+        self.lines[i] = first;
+        self.lines.insert(i + 1, second);
         true
     }
 
@@ -447,8 +506,13 @@ impl Lyrics {
         }
         let next = self.lines.remove(i + 1);
         let line = &mut self.lines[i];
+        let both_timed = line.words_match() && next.words_match() && !line.words.is_empty() && !next.words.is_empty();
         line.text = format!("{} {}", line.text.trim(), next.text.trim()).trim().to_owned();
         line.end = next.end;
+        if both_timed {
+            line.words.extend(next.words);
+        }
+        line.fit_words();
         true
     }
 
@@ -671,6 +735,43 @@ mod tests {
         assert_eq!(section_at(&s, 61.0), None);
     }
 
+    fn timed(text: &str, words: &[(&str, f64, f64)]) -> LyricLine {
+        let (start, end) = (words[0].1, words[words.len() - 1].2);
+        LyricLine {
+            words: words.iter().map(|&(t, s, e)| LyricWord { text: t.into(), start: s, end: e }).collect(),
+            ..LyricLine::new(text, start, end)
+        }
+    }
+
+    #[test]
+    fn word_timings_survive_edits_or_go_away() {
+        // Old saved lines have no words.
+        let old: Vec<LyricLine> = serde_json::from_str(r#"[{"text":"Amazing grace","start":1.0,"end":3.0}]"#).unwrap();
+        assert!(old[0].words.is_empty());
+        assert!(!serde_json::to_string(&old).unwrap().contains("words"), "not written when empty");
+
+        let mut l = Lyrics {
+            lines: vec![timed("Here comes the sun", &[("Here", 1.0, 1.5), ("comes", 1.5, 2.0), ("the", 2.5, 2.7), ("sun", 2.7, 4.0)])],
+            ..Default::default()
+        };
+        // Split between "comes" and "the": each half keeps its own words.
+        assert!(l.split_at(0, 2.2));
+        assert_eq!(l.lines[0].text, "Here comes");
+        assert_eq!(l.lines[1].text, "the sun");
+        assert_eq!(l.lines[1].words[0].start, 2.5);
+        // Merge back.
+        assert!(l.merge_with_next(0));
+        assert_eq!(l.lines[0].words.len(), 4);
+        // Moving the start later clamps the words into the line.
+        l.set_start(0, 1.8);
+        l.tidy_words();
+        assert!(l.lines[0].words.iter().all(|w| w.start >= 1.8 && w.end <= l.lines[0].end));
+        // A text edit makes them stale: dropped.
+        l.lines[0].text = "Here comes the moon".into();
+        l.tidy_words();
+        assert!(l.lines[0].words.is_empty());
+    }
+
     #[test]
     fn mixers_saved_before_sections_still_load() {
         let m: SongMixer = serde_json::from_str(r#"{"master_db":-3.0,"tracks":[],"cues":[]}"#).unwrap();
@@ -713,7 +814,7 @@ mod lyric_edit_tests {
 
     fn lyrics(spec: &[(&str, f64, f64)]) -> Lyrics {
         Lyrics {
-            lines: spec.iter().map(|(t, s, e)| LyricLine { text: (*t).into(), start: *s, end: *e }).collect(),
+            lines: spec.iter().map(|(t, s, e)| LyricLine::new(*t, *s, *e)).collect(),
             ..Default::default()
         }
     }

@@ -21,6 +21,11 @@ A desktop app for worship teams and live music. Split any song into stems, mix t
   - Three starter loops are built in: Clouds, Flowers and Drapes.
   - You can also use your own image or short video loop.
   - A darken slider keeps the text readable.
+- **Align (offline, word by word).** Click **Align** next to **Import…** to time the lyrics you pasted or imported to the singer, using the split vocals stem.
+  - It runs on your computer with a local speech model (a one-time 122 MB download in **Window → Models**). No audio or lyrics are uploaded, and no API key is needed.
+  - You get line and word timing, which you review before it's used: green lines matched clearly, amber lines need a check, grey lines weren't found in the singing. **Use Timing** can be undone with ⌘Z.
+  - Sung parts that aren't in your lyrics, and lyrics that aren't sung, are handled without dragging the other lines off.
+  - Limits: English only, and the model was trained on read speech, not singing. Long held notes, runs, backing vocals and ad-libs can confuse it, so check the result. Timing is per word, not per syllable.
 - **AI lyrics (optional).**
   - Transcribe a song with Whisper (OpenAI or Groq), or align lyrics you already have to the singer's phrases.
   - Alignment can run fully on-device.
@@ -127,4 +132,5 @@ git push origin v0.1.0
 
 - **Starter backgrounds:** stock footage from [Mixkit](https://mixkit.co) under the Mixkit Stock Video Free License. See [`assets/backgrounds/CREDITS.md`](assets/backgrounds/CREDITS.md).
 - **Separation:** [Demucs](https://github.com/adefossez/demucs) and [python-audio-separator](https://github.com/nomadkaraoke/python-audio-separator) (UVR models).
+- **Lyrics alignment:** [wav2vec 2.0](https://arxiv.org/abs/2006.11477) `facebook/wav2vec2-base-960h` by Meta AI (Apache-2.0), as the int8 ONNX export [MixDirective/wav2vec2-base-960h-onnx](https://huggingface.co/MixDirective/wav2vec2-base-960h-onnx) (Apache-2.0; pinned revision, SHA-256 checked), run with [ONNX Runtime](https://onnxruntime.ai).
 - **UI:** built with [egui](https://github.com/emilk/egui).

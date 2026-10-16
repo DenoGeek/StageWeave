@@ -180,6 +180,40 @@ pub fn draw(app: &mut StageWeaveApp, ctx: &egui::Context) {
             }
             next = Some(Dialog::ExportProject { id, include_stems });
         }
+        Dialog::AlignModel => {
+            let (mut download, mut models) = (false, false);
+            let model = crate::engine::local_align::model(&app.store);
+            keep = modal(ctx, "Download the Alignment Model?", |ui| {
+                ui.label(RichText::new(model.name).strong().color(Color32::WHITE));
+                ui.label(
+                    RichText::new(format!(
+                        "Align needs this model once ({}). After that it works offline: your audio and lyrics never leave this computer.",
+                        crate::engine::models::human_bytes(model.bytes)
+                    ))
+                    .color(TEXT_DIM),
+                );
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new("It understands English and was trained on speech, not singing, so check the result before you use it.")
+                        .size(11.5)
+                        .color(TEXT_FAINT),
+                );
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    download = primary_button(ui, "Download & Align", true).clicked();
+                    models = ui.button("Open Models…").clicked();
+                });
+            });
+            if keep && download {
+                app.dialog = None;
+                app.local_align(ctx, true);
+                keep = false;
+            } else if keep && models {
+                app.show_models = true;
+                keep = false;
+            }
+            next = Some(Dialog::AlignModel);
+        }
         Dialog::MovingWorkspace { progress, file } => {
             let _ = modal(ctx, "Moving Workspace", |ui| {
                 ui.label(RichText::new(format!("Copying {file}")).color(TEXT_DIM));

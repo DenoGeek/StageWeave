@@ -10,9 +10,10 @@ to stderr.
     python stageweave_worker.py delete   --models-dir DIR MODEL
     python stageweave_worker.py separate --engine demucs|uvr --model ID \
         --input FILE --out DIR [--device auto|cpu|cuda|mps] [--models-dir DIR]
+    python stageweave_worker.py emissions --model align:ID --input VOCALS.wav --out FILE
 
-MODEL is written as `engine:id`, e.g. `demucs:htdemucs_6s` or
-`uvr:UVR_MDXNET_KARA_2.onnx`.
+MODEL is written as `engine:id`, e.g. `demucs:htdemucs_6s`,
+`uvr:UVR_MDXNET_KARA_2.onnx` or `align:wav2vec2-base-960h-int8`.
 
 Messages:
     {"t": "stage", "text": "..."}
@@ -21,6 +22,8 @@ Messages:
     {"t": "model", "key": "engine:id", "downloaded": bool, "on_disk": bytes, "total": bytes|null}
     {"t": "stem", "kind": "vocals", "path": "/abs/path.wav"}
     {"t": "env", ...}
+    {"t": "emissions", "path": FILE, "frames": N, "classes": C, "stride": 0.02,
+     "vocab": {...}, "load_s": s, "infer_s": s, "peak_rss_mb": mb}
     {"t": "done"}
     {"t": "error", "msg": "..."}
 
@@ -29,6 +32,9 @@ Engines:
             Hugging Face hub (`adefossez/HTDemucs*`).
     uvr:    Ultimate Vocal Remover models (https://github.com/Anjok07/ultimatevocalremovergui)
             run headless through python-audio-separator (MIT).
+    align:  CTC acoustic models for lyrics alignment, run with ONNX Runtime on
+            the CPU. `emissions` only computes per-frame character
+            log-probabilities; the app does the alignment itself.
 """
 
 import argparse
@@ -137,7 +143,7 @@ def version_of(pkg):
 
 def parse_model(key):
     engine, _, model_id = key.partition(":")
-    if engine not in ("demucs", "uvr") or not model_id:
+    if engine not in ("demucs", "uvr", "align") or not model_id:
         raise SystemExit(f"bad model key {key!r}, expected engine:id")
     return engine, model_id
 
@@ -150,6 +156,7 @@ def cmd_env_info(_args):
         "torch": version_of("torch"),
         "demucs": version_of("demucs"),
         "audio_separator": version_of("audio-separator"),
+        "onnxruntime": version_of("onnxruntime") or version_of("onnxruntime-gpu"),
         "device": None,
     }
     try:
@@ -433,6 +440,197 @@ def uvr_delete(models_dir, model_id):
                 p.unlink()
 
 
+# --------------------------------------------------------------------------- alignment models
+
+# Pinned: repo, exact revision, and the SHA-256 of every weight file (from the
+# repo's LFS metadata). Nothing else is ever downloaded for these models.
+ALIGN_MODELS = {
+    "wav2vec2-base-960h-int8": {
+        # Apache-2.0 ONNX export of facebook/wav2vec2-base-960h (Meta AI).
+        "repo": "MixDirective/wav2vec2-base-960h-onnx",
+        "revision": "0d4c5dd9249432d9c415ee33d53cad7a28159690",
+        "files": {
+            "model.int8.onnx": (121954282, "02bcb2e690107934e4636ff883a2623f2f4a186530d42594296df87711789202"),
+            "vocab.json": (291, None),
+        },
+        "model": "model.int8.onnx",
+        "sample_rate": 16000,
+        "hop": 320,  # samples per output frame (20 ms)
+    },
+}
+
+
+def align_spec(model_id):
+    spec = ALIGN_MODELS.get(model_id)
+    if spec is None:
+        raise SystemExit(f"unknown alignment model {model_id!r}")
+    return spec
+
+
+def align_cached(spec, fname):
+    from huggingface_hub import try_to_load_from_cache
+
+    p = try_to_load_from_cache(spec["repo"], fname, revision=spec["revision"])
+    return p if isinstance(p, str) and os.path.exists(p) else None
+
+
+def sha256_of(path):
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def align_verify(spec, fname, path):
+    size, digest = spec["files"][fname]
+    if os.path.getsize(path) != size or (digest and sha256_of(path) != digest):
+        raise RuntimeError(
+            f"Integrity check failed for {fname}. Delete the model in Window → Models and download it again."
+        )
+
+
+def align_status(model_id):
+    spec = align_spec(model_id)
+    on_disk, have_all = 0, True
+    for fname in spec["files"]:
+        p = align_cached(spec, fname)
+        if p:
+            on_disk += os.path.getsize(p)
+        else:
+            have_all = False
+    total = sum(size for size, _ in spec["files"].values())
+    return have_all, on_disk, total
+
+
+def align_download(model_id):
+    from huggingface_hub import hf_hub_download
+
+    install_tqdm_hook()
+    spec = align_spec(model_id)
+    reporter = DownloadReporter(total=sum(size for size, _ in spec["files"].values()))
+    for fname, (size, _) in spec["files"].items():
+        path = align_cached(spec, fname)
+        if path is None:
+            stage(f"Downloading {fname}")
+
+            def on_bar(bar, fname=fname):
+                if is_byte_bar(bar):
+                    reporter.report(bar.n, fname)
+
+            _TQDM_LISTENERS.append(on_bar)
+            try:
+                path = hf_hub_download(spec["repo"], fname, revision=spec["revision"])
+            finally:
+                _TQDM_LISTENERS.remove(on_bar)
+        stage(f"Verifying {fname}")
+        try:
+            align_verify(spec, fname, path)
+        except RuntimeError:
+            # Don't keep a bad file around: the next download starts clean.
+            os.unlink(path)
+            raise
+        reporter.finish_file(size)
+        reporter.report(0, fname, force=True)
+
+
+def align_delete(model_id):
+    from huggingface_hub import constants
+
+    repo_dir = Path(constants.HF_HUB_CACHE) / ("models--" + align_spec(model_id)["repo"].replace("/", "--"))
+    shutil.rmtree(repo_dir, ignore_errors=True)
+
+
+def peak_rss_mb():
+    try:
+        import resource
+
+        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return round(rss / (1 << 20) if sys.platform == "darwin" else rss / 1024, 1)
+    except ImportError:  # Windows
+        return None
+
+
+def cmd_emissions(args):
+    """Per-frame character log-probabilities of a vocals stem (no network)."""
+    import numpy as np
+    import onnxruntime as ort
+    import soundfile as sf
+    import soxr
+
+    engine, model_id = parse_model(args.model)
+    if engine != "align":
+        raise SystemExit("emissions needs an align: model")
+    spec = align_spec(model_id)
+    paths = {}
+    for fname in spec["files"]:
+        p = align_cached(spec, fname)
+        if p is None:
+            raise RuntimeError("The alignment model isn't downloaded. Download it in Window → Models.")
+        paths[fname] = p
+    stage("Checking the alignment model")
+    align_verify(spec, spec["model"], paths[spec["model"]])
+    with open(paths["vocab.json"]) as f:
+        vocab = json.load(f)
+
+    stage("Loading the alignment model")
+    t0 = time.monotonic()
+    opts = ort.SessionOptions()
+    opts.intra_op_num_threads = max(1, (os.cpu_count() or 2) - 1)
+    session = ort.InferenceSession(paths[spec["model"]], opts, providers=["CPUExecutionProvider"])
+    load_s = time.monotonic() - t0
+
+    stage("Reading the vocals")
+    rate, hop = spec["sample_rate"], spec["hop"]
+    audio, sr = sf.read(args.input, dtype="float32", always_2d=True)
+    audio = audio.mean(axis=1)
+    if sr != rate:
+        audio = soxr.resample(audio, sr, rate)
+    audio = np.ascontiguousarray(audio, dtype=np.float32)
+
+    # 15 s windows with 1 s of context each side, normalised per window like
+    # the model's training utterances. Window starts are whole frames.
+    # (30 s windows double peak memory, ~1.3 GB, for no gain in speed.)
+    stage("Listening to the vocals")
+    win, ctx = 15 * rate, rate
+    starts = list(range(0, len(audio), win))
+    progress = Progress(0.0, 0.98)
+    t0 = time.monotonic()
+    frames = 0
+    classes = None
+    with open(args.out, "wb") as out:
+        for k, s in enumerate(starts):
+            a, b = max(0, s - ctx), min(len(audio), s + win + ctx)
+            x = audio[a:b]
+            x = (x - x.mean()) / np.sqrt(x.var() + 1e-7)
+            logits = session.run(None, {"input_values": x[None, :].astype(np.float32)})[0][0]
+            first = (s - a) // hop
+            count = (min(len(audio), s + win) - s) // hop
+            chunk = logits[first : first + count].astype(np.float64)
+            m = chunk.max(axis=1, keepdims=True)
+            logp = chunk - m - np.log(np.exp(chunk - m).sum(axis=1, keepdims=True))
+            logp.astype("<f4").tofile(out)
+            frames += logp.shape[0]
+            classes = logp.shape[1]
+            progress((k + 1) / len(starts))
+    infer_s = time.monotonic() - t0
+    emit(
+        t="emissions",
+        path=str(Path(args.out).resolve()),
+        frames=frames,
+        classes=classes or 0,
+        stride=hop / rate,
+        vocab=vocab,
+        load_s=round(load_s, 3),
+        infer_s=round(infer_s, 3),
+        peak_rss_mb=peak_rss_mb(),
+    )
+    emit(t="progress", v=1.0)
+    emit(t="done")
+
+
 # --------------------------------------------------------------------------- model commands
 
 
@@ -442,6 +640,8 @@ def cmd_status(args):
         try:
             if engine == "demucs":
                 downloaded, on_disk, total = demucs_status(model_id, args.remote)
+            elif engine == "align":
+                downloaded, on_disk, total = align_status(model_id)
             else:
                 downloaded, on_disk, total = uvr_status(args.models_dir, model_id, args.remote)
             emit(t="model", key=key, downloaded=downloaded, on_disk=on_disk, total=total)
@@ -455,6 +655,8 @@ def cmd_download(args):
     engine, model_id = parse_model(args.model)
     if engine == "demucs":
         demucs_download(model_id)
+    elif engine == "align":
+        align_download(model_id)
     else:
         uvr_download(args.models_dir, model_id)
     emit(t="done")
@@ -464,6 +666,8 @@ def cmd_delete(args):
     engine, model_id = parse_model(args.model)
     if engine == "demucs":
         demucs_delete(model_id)
+    elif engine == "align":
+        align_delete(model_id)
     else:
         uvr_delete(args.models_dir, model_id)
     emit(t="done")
@@ -581,6 +785,11 @@ def main():
     sep.add_argument("--out", required=True)
     sep.add_argument("--device", default="auto")
     sep.add_argument("--models-dir", default=None)
+
+    em = sub.add_parser("emissions")
+    em.add_argument("--model", required=True)
+    em.add_argument("--input", required=True)
+    em.add_argument("--out", required=True)
     args = parser.parse_args()
 
     commands = {
@@ -589,6 +798,7 @@ def main():
         "download": cmd_download,
         "delete": cmd_delete,
         "separate": cmd_separate,
+        "emissions": cmd_emissions,
     }
     code = 0
     try:

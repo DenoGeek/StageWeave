@@ -427,25 +427,26 @@ fn options(app: &mut StageWeaveApp, ui: &mut Ui, configured: &[Provider], align:
 
 fn running(app: &mut StageWeaveApp, ui: &mut Ui) {
     let Some(job) = &app.ai_panel.job else { return };
-    let (stage, secs) = (job.stage.clone(), job.started.elapsed().as_secs());
+    let (stage, secs, progress) = (job.stage.clone(), job.started.elapsed().as_secs(), job.progress);
+    let title = if app.ai_panel.mode == AiMode::Align { "Aligning…" } else { "Transcribing…" };
     ui.add_space(24.0);
     ui.vertical_centered(|ui| {
         ui.add(egui::Spinner::new().size(34.0).color(VIOLET_LIGHT));
         ui.add_space(14.0);
-        ui.label(RichText::new("Transcribing…").size(16.0).color(Color32::WHITE));
+        ui.label(RichText::new(title).size(16.0).color(Color32::WHITE));
         ui.add_space(4.0);
         ui.label(RichText::new(stage).color(TEXT_DIM));
         ui.label(RichText::new(format!("{}:{:02}", secs / 60, secs % 60)).monospace().color(TEXT_FAINT));
     });
     ui.add_space(14.0);
-    progress_bar(ui, -1.0);
+    progress_bar(ui, progress.unwrap_or(-1.0));
     ui.add_space(16.0);
     ui.horizontal(|ui| {
         if ui.add(egui::Button::new("Cancel").min_size(vec2(90.0, 28.0))).clicked() {
             app.cancel_transcription();
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.label(RichText::new("You can close this window; transcription keeps going.").size(11.0).color(TEXT_FAINT));
+            ui.label(RichText::new("You can close this window; it keeps going.").size(11.0).color(TEXT_FAINT));
         });
     });
 }
@@ -523,6 +524,8 @@ fn transcript_view(app: &mut StageWeaveApp, ui: &mut Ui, t: crate::ai::Transcrip
 
 fn alignment_view(app: &mut StageWeaveApp, ui: &mut Ui, a: crate::align::Alignment) {
     use crate::align::{AlignSource, MATCHED};
+    use crate::ctc_align::CHECK_BELOW;
+    let local = a.source == AlignSource::Local;
     let estimated = a.total() - a.matched;
     ui.horizontal(|ui| {
         let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
@@ -530,12 +533,26 @@ fn alignment_view(app: &mut StageWeaveApp, ui: &mut Ui, a: crate::align::Alignme
         let summary = match a.source {
             AlignSource::Whisper => format!("{} of {} lines matched to the singing", a.matched, a.total()),
             AlignSource::OnDevice => format!("{} lines placed on the singer's phrases", a.total()),
+            AlignSource::Local => format!("{} of {} lines aligned to the singing", a.lines.iter().filter(|l| l.found).count(), a.total()),
         };
         ui.label(RichText::new(summary).size(14.0).color(Color32::WHITE));
         if a.source == AlignSource::Whisper && estimated > 0 {
             ui.label(RichText::new(format!("· {estimated} estimated")).color(SOLO_ON));
         }
+        let check = a.lines.iter().filter(|l| l.found && l.confidence < CHECK_BELOW).count();
+        if local && check > 0 {
+            ui.label(RichText::new(format!("· {check} to check")).color(SOLO_ON));
+        }
     });
+    // Applying replaces timing the user may have corrected by hand.
+    let timed = app.session.lyrics.lines.len();
+    if timed > 0 {
+        ui.label(
+            RichText::new(format!("Use Timing replaces the timing of your {timed} timed lines (⌘Z undoes it)."))
+                .size(11.0)
+                .color(SOLO_ON),
+        );
+    }
     if let Some(note) = &a.note {
         ui.label(RichText::new(note).size(11.0).color(TEXT_FAINT));
     }
@@ -549,8 +566,14 @@ fn alignment_view(app: &mut StageWeaveApp, ui: &mut Ui, a: crate::align::Alignme
                     .inner_margin(egui::Margin::symmetric(10, 5))
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        ui.horizontal(|ui| {
-                            let (dot, tip) = if a.source == AlignSource::OnDevice {
+                        let row = ui.horizontal(|ui| {
+                            let (dot, tip) = if local && !l.found {
+                                (TEXT_FAINT, "Not found in the singing: placed between its neighbours")
+                            } else if local && l.confidence < CHECK_BELOW {
+                                (SOLO_ON, "Low confidence: check this line in Edit mode")
+                            } else if local {
+                                (SUCCESS, "Aligned to the singing")
+                            } else if a.source == AlignSource::OnDevice {
                                 (TEXT_FAINT, "Placed by vocal phrases")
                             } else if l.confidence >= MATCHED {
                                 (SUCCESS, "Matched to the words Whisper heard")
@@ -566,6 +589,10 @@ fn alignment_view(app: &mut StageWeaveApp, ui: &mut Ui, a: crate::align::Alignme
                             );
                             ui.add(egui::Label::new(RichText::new(&l.line.text).size(13.5).color(TEXT)).wrap());
                         });
+                        if !l.line.words.is_empty() {
+                            let words: Vec<String> = l.line.words.iter().map(|w| format!("{} {}", w.text, timecode(w.start))).collect();
+                            row.response.on_hover_text(format!("Confidence {:.2}\n{}", l.confidence, words.join("  ·  ")));
+                        }
                     });
             }
         });
@@ -590,7 +617,9 @@ fn alignment_view(app: &mut StageWeaveApp, ui: &mut Ui, a: crate::align::Alignme
         }
     });
     ui.add_space(8.0);
-    let tip = if a.source == AlignSource::OnDevice {
+    let tip = if local {
+        "Aligned on this computer with an English speech model. It wasn't trained on singing: check amber and grey lines in Edit mode on the monitor (I / O)."
+    } else if a.source == AlignSource::OnDevice {
         "On-device timing follows the singer's breaths. Fine-tune any line in Edit mode on the monitor (I / O)."
     } else {
         "Amber lines were estimated from the singing around them. Check them in Edit mode on the monitor (I / O)."

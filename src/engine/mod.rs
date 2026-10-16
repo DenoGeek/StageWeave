@@ -5,6 +5,7 @@
 mod aligner;
 mod decoder;
 pub mod ffmpeg;
+pub mod local_align;
 pub mod mock;
 pub mod models;
 mod playback;

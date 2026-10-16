@@ -170,6 +170,17 @@ pub enum Dialog {
     ReplaceLine { line: usize, t: f64 },
     /// Options before saving a project archive.
     ExportProject { id: i64, include_stems: bool },
+    /// Align needs the alignment model: offer to download it.
+    AlignModel,
+}
+
+/// What's missing before Align can run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AlignBlocker {
+    NoLyrics,
+    NoVocals,
+    NoEngine,
+    NeedsModel,
 }
 
 /// Cue loops: Q marks a start, Q again closes the cue and loops it.
@@ -1528,6 +1539,7 @@ impl StageWeaveApp {
     /// Persist lyrics + mixer for the open song if they changed.
     pub fn save_song_state(&mut self) {
         let Some(id) = self.current_song_id() else { return };
+        self.session.lyrics.tidy_words();
         let Some(json) = self.state_json() else { return };
         if json == self.last_saved_state {
             return;
@@ -1928,6 +1940,75 @@ impl StageWeaveApp {
         self.ai_panel.job = Some(TranscribeJob::spawn(song_id, req, ctx.clone()));
     }
 
+    /// Why Align can't run right now (checked in this order), if anything.
+    pub fn align_blocker(&self) -> Option<AlignBlocker> {
+        if self.session.lyrics.raw_text.trim().is_empty() {
+            return Some(AlignBlocker::NoLyrics);
+        }
+        if self.vocals_stem_path().is_none() {
+            return Some(AlignBlocker::NoVocals);
+        }
+        let (Some(env), Some(mm)) = (&self.env, &self.model_manager) else { return Some(AlignBlocker::NoEngine) };
+        if !matches!(env.status(), EnvStatus::Ready(_)) {
+            return Some(AlignBlocker::NoEngine);
+        }
+        let model = crate::engine::local_align::model(&self.store);
+        (!mm.view(model.key).is_downloaded()).then_some(AlignBlocker::NeedsModel)
+    }
+
+    /// The split vocals file on disk, if this song has one.
+    fn vocals_stem_path(&self) -> Option<PathBuf> {
+        self.session.tracks.iter().find(|t| t.kind == StemKind::Vocals).and_then(|t| t.path.clone()).filter(|p| p.is_file())
+    }
+
+    /// Align: time the Lyrics panel's text to the vocals stem, on this
+    /// computer. The result opens for review; nothing changes until
+    /// "Use Timing". `allow_download`: the user agreed to get the model.
+    pub fn local_align(&mut self, ctx: &egui::Context, allow_download: bool) {
+        let Some(song_id) = self.current_song_id() else { return };
+        if self.ai_panel.job.is_some() {
+            // One job at a time: show the one that's running.
+            self.ai_panel.open = true;
+            return;
+        }
+        match self.align_blocker() {
+            Some(AlignBlocker::NoLyrics) => return self.toast(ToastKind::Info, "Paste or import the lyrics first, then press Align."),
+            Some(AlignBlocker::NoVocals) => {
+                return self.toast(ToastKind::Info, "Align listens to the isolated vocals. Split the song into stems first (Song panel).");
+            }
+            Some(AlignBlocker::NoEngine) => {
+                return self.toast(ToastKind::Info, "Align needs the audio engine. Install it from the Song panel, then press Align.");
+            }
+            Some(AlignBlocker::NeedsModel) if !allow_download => {
+                self.dialog = Some(Dialog::AlignModel);
+                return;
+            }
+            _ => {}
+        }
+        let (Some(env), Some(mm), Some(vocals)) = (self.env.clone(), self.model_manager.clone(), self.vocals_stem_path()) else { return };
+        let text = self.session.lyrics.raw_text.trim().to_owned();
+        let lines = text.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_owned).collect();
+        let req = crate::engine::local_align::AlignRequest {
+            vocals,
+            lines,
+            duration: self.session.duration(),
+            model: crate::engine::local_align::model(&self.store),
+            allow_download,
+        };
+        self.ai_panel.mode = AiMode::Align;
+        self.ai_panel.align_text = text;
+        self.ai_panel.error = None;
+        self.ai_panel.result = None;
+        self.ai_panel.open = true;
+        self.ai_panel.job = Some(crate::engine::local_align::spawn(song_id, req, env, mm, ctx.clone()));
+    }
+
+    /// Progress of a running local alignment, for the Align button.
+    pub fn align_progress(&self) -> Option<Option<f32>> {
+        let job = self.ai_panel.job.as_ref()?;
+        (self.ai_panel.mode == AiMode::Align).then_some(job.progress)
+    }
+
     pub fn cancel_transcription(&mut self) {
         if let Some(job) = self.ai_panel.job.take() {
             job.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1940,6 +2021,7 @@ impl StageWeaveApp {
         while let Ok(ev) = job.rx.try_recv() {
             match ev {
                 JobEvent::Stage(s) => job.stage = s,
+                JobEvent::Progress(p) => job.progress = (p >= 0.0).then_some(p),
                 JobEvent::Done(r) => done = Some(r),
             }
         }
@@ -2500,12 +2582,17 @@ impl StageWeaveApp {
         let (Some(env), Some(mm)) = (&self.env, &self.model_manager) else { return };
         if matches!(env.status(), EnvStatus::Ready(_)) {
             self.models_refreshed = true;
-            mm.refresh(ctx, self.models.iter().map(|m| m.key()).collect(), true);
+            mm.refresh(ctx, self.model_keys(), true);
         }
     }
 
+    /// Every managed model: separation models, then lyrics alignment.
     pub fn model_keys(&self) -> Vec<String> {
-        self.models.iter().map(|m| m.key()).collect()
+        self.models
+            .iter()
+            .map(|m| m.key())
+            .chain(crate::engine::local_align::ALIGN_MODELS.iter().map(|m| m.key.to_owned()))
+            .collect()
     }
 
     fn handle_input(&mut self, ctx: &egui::Context) {
@@ -2758,7 +2845,7 @@ mod history_tests {
         app.session.lyrics.lines = ["A", "B", "C"]
             .iter()
             .enumerate()
-            .map(|(i, t)| LyricLine { text: (*t).into(), start: i as f64 * 10.0, end: i as f64 * 10.0 + 4.0 })
+            .map(|(i, t)| LyricLine::new(*t, i as f64 * 10.0, i as f64 * 10.0 + 4.0))
             .collect();
         app.session.lyrics.raw_text = "A\nB\nC".into();
         app.session.source = app.decoder.load(std::path::Path::new("song.mp3")).ok();
@@ -3166,5 +3253,68 @@ mod history_tests {
         a.undo();
         assert_eq!(texts(&a), vec!["A", "B", "C"]);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn align_explains_what_is_missing_first() {
+        let mut a = app();
+        a.screen = Screen::Song { project: 0, song: 0 };
+        a.session.lyrics.raw_text = "  \n ".into();
+        assert_eq!(a.align_blocker(), Some(AlignBlocker::NoLyrics));
+        a.session.lyrics.raw_text = "Amazing grace".into();
+        assert_eq!(a.align_blocker(), Some(AlignBlocker::NoVocals), "not split yet");
+        // A vocals stem on disk, but demo mode has no engine.
+        let dir = std::env::temp_dir().join(format!("sw-align-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wav = dir.join("vocals.wav");
+        std::fs::write(&wav, b"RIFF").unwrap();
+        a.session.tracks = vec![Track::new(StemKind::Vocals, crate::model::Peaks::default(), Some(wav), None)];
+        assert_eq!(a.align_blocker(), Some(AlignBlocker::NoEngine));
+        let ctx = egui::Context::default();
+        a.local_align(&ctx, false);
+        assert!(a.ai_panel.job.is_none(), "nothing starts");
+        assert!(a.toasts.last().is_some_and(|t| t.text.contains("audio engine")));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_local_alignment_is_reviewed_then_applied_with_word_timing_in_one_undo_step() {
+        use crate::ctc_align::{AlignmentResult, LineStatus, ResultLine, ResultWord};
+        let mut a = app();
+        a.screen = Screen::Song { project: 0, song: 0 };
+        let w = |t: &str, s: f64, e: f64| ResultWord { text: t.into(), start: s, end: e, confidence: Some(0.8) };
+        let r = AlignmentResult {
+            version: 1,
+            model: "wav2vec2-base-960h-int8".into(),
+            language: "en".into(),
+            duration: 30.0,
+            lines: vec![
+                ResultLine {
+                    index: 0,
+                    text: "Here comes the sun".into(),
+                    start: 12.4,
+                    end: 13.85,
+                    confidence: 0.8,
+                    status: LineStatus::Aligned,
+                    words: vec![w("Here", 12.4, 12.72), w("comes", 12.73, 13.1), w("the", 13.11, 13.25), w("sun", 13.26, 13.85)],
+                },
+                ResultLine { index: 1, text: "Not sung".into(), start: 13.85, end: 20.0, confidence: 0.0, status: LineStatus::NotFound, words: vec![] },
+            ],
+        };
+        // What the job hands back: shown for review, nothing applied yet.
+        a.ai_panel.align_text = "Here comes the sun\nNot sung".into();
+        a.ai_panel.result = Some((0, AiResult::Alignment(crate::engine::local_align::to_alignment(&r))));
+        assert_eq!(texts(&a), vec!["A", "B", "C"], "unchanged until Use Timing");
+        a.apply_ai_result(true);
+        assert_eq!(texts(&a), vec!["Here comes the sun", "Not sung"]);
+        let l = &a.session.lyrics.lines[0];
+        assert_eq!(l.words.len(), 4);
+        assert_eq!((l.words[1].text.as_str(), l.words[1].start), ("comes", 12.73));
+        assert!(a.session.lyrics.lines[1].words.is_empty());
+        // Saved with the song (word timing included), and one undo restores the old lines.
+        let json = a.state_json().unwrap();
+        assert!(json.contains("comes") && json.contains("12.73"));
+        a.undo();
+        assert_eq!(texts(&a), vec!["A", "B", "C"]);
     }
 }

@@ -25,6 +25,8 @@ pub enum AlignSource {
     Whisper,
     /// From the vocal stem's energy only (nothing uploaded).
     OnDevice,
+    /// Local CTC forced alignment (the alignment model, offline).
+    Local,
 }
 
 #[derive(Clone, Debug)]
@@ -32,6 +34,9 @@ pub struct AlignedLine {
     pub line: LyricLine,
     /// 0 = estimated, 1 = every word matched to the singing.
     pub confidence: f32,
+    /// False when the line couldn't be found in the singing at all and was
+    /// only placed between its neighbours (local alignment).
+    pub found: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -444,7 +449,7 @@ pub fn align(lyrics_text: &str, words: Option<&[Word]>, vocals: Option<&Peaks>, 
     let lines = user
         .iter()
         .zip(times)
-        .map(|(u, (s, e, c))| AlignedLine { line: LyricLine { text: u.text.clone(), start: s, end: e }, confidence: c })
+        .map(|(u, (s, e, c))| AlignedLine { line: LyricLine::new(u.text.clone(), s, e), confidence: c, found: true })
         .collect();
     Alignment { note: None, lines, matched, source }
 }

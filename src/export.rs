@@ -451,7 +451,7 @@ mod tests {
     #[test]
     #[ignore]
     fn renders_a_frame() {
-        let lyrics = Lyrics { lines: vec![LyricLine { text: "Amazing grace".into(), start: 0.0, end: 4.0 }], ..Default::default() };
+        let lyrics = Lyrics { lines: vec![LyricLine::new("Amazing grace", 0.0, 4.0)], ..Default::default() };
         let mut r = FrameRenderer::new(320, 180).unwrap();
         let px = r.render(|p, rect| lyrics_view::paint(p, rect, &lyrics, 1.0, 10.0, 1.0, Backdrop::Theme)).unwrap();
         assert_eq!(px.len(), 320 * 180 * 4);
@@ -482,8 +482,8 @@ mod tests {
         let lyrics = Lyrics {
             title: "Export Test".into(),
             lines: vec![
-            LyricLine { text: "Ana mipango mema (He has good plans)".into(), start: 1.0, end: 3.5 },
-                LyricLine { text: "Amazing grace".into(), start: 3.5, end: 6.0 },
+            LyricLine::new("Ana mipango mema (He has good plans)", 1.0, 3.5),
+                LyricLine::new("Amazing grace", 3.5, 6.0),
             ],
             ..Default::default()
         };

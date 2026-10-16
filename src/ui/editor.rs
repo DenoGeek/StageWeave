@@ -55,6 +55,7 @@ fn lyrics(app: &mut StageWeaveApp, ui: &mut Ui) {
             if ui.button(RichText::new("Import…").size(11.5)).on_hover_text(tip).clicked() {
                 app.import_lyrics_dialog();
             }
+            align_button(app, ui);
         });
     });
     let l = &mut app.session.lyrics;
@@ -199,6 +200,36 @@ fn background_picker(app: &mut StageWeaveApp, ui: &mut Ui) {
 }
 
 /// One-time ffmpeg download status (needed for video backgrounds and export).
+/// Align: time the lyrics to the vocals stem on this computer.
+fn align_button(app: &mut StageWeaveApp, ui: &mut Ui) {
+    let running = app.align_progress();
+    let label = match running {
+        Some(Some(p)) => format!("Aligning… {:.0}%", p * 100.0),
+        Some(None) => "Aligning…".to_owned(),
+        None => "Align".to_owned(),
+    };
+    let tip = match (running, app.align_blocker()) {
+        (Some(_), _) => "Aligning on this computer. Click to see progress or cancel.".to_owned(),
+        (None, Some(crate::app::AlignBlocker::NoLyrics)) => "Paste or import the lyrics first.".to_owned(),
+        (None, Some(crate::app::AlignBlocker::NoVocals)) => "Align listens to the isolated vocals. Split the song first.".to_owned(),
+        (None, Some(crate::app::AlignBlocker::NoEngine)) => "Needs the audio engine (Song panel).".to_owned(),
+        (None, Some(crate::app::AlignBlocker::NeedsModel)) => {
+            "Time these lyrics to the singing, offline. Needs a one-time model download (122 MB).".to_owned()
+        }
+        (None, None) => "Time these lyrics to the singing, word by word, on this computer (English). You review the result before it's used.".to_owned(),
+    };
+    let can = app.session.source.is_some();
+    let resp = ui.add_enabled(can, egui::Button::new(RichText::new(label).size(11.5))).on_hover_text(tip).on_disabled_hover_text("Open a song first");
+    if running.is_some() {
+        ui.add(egui::Spinner::new().size(12.0).color(ACCENT_BRIGHT));
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+    }
+    if resp.clicked() {
+        let ctx = ui.ctx().clone();
+        app.local_align(&ctx, false);
+    }
+}
+
 pub fn ffmpeg_status(app: &StageWeaveApp, ui: &mut Ui) {
     use crate::engine::ffmpeg::FfmpegStatus;
     match app.ffmpeg.status() {
@@ -509,7 +540,7 @@ mod tests {
         app.session.lyrics.lines = ["A", "B", "C"]
             .iter()
             .enumerate()
-            .map(|(i, t)| LyricLine { text: (*t).into(), start: i as f64 * 10.0, end: i as f64 * 10.0 + 4.0 })
+            .map(|(i, t)| LyricLine::new(*t, i as f64 * 10.0, i as f64 * 10.0 + 4.0))
             .collect();
         app.session.lyrics.raw_text = "A\nB\nC".into();
         app.lyric_clip_select(1); // shows the row's quick actions

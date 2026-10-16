@@ -111,7 +111,7 @@ fn lrc(content: &str) -> Imported {
         let text = clean_inline(text);
         for t in times {
             // An empty stamped line marks where the previous line stops.
-            timed.push(LyricLine { text: text.clone(), start: (t - offset).max(0.0), end: 0.0 });
+            timed.push(LyricLine::new(text.clone(), (t - offset).max(0.0), 0.0));
         }
     }
     timed.sort_by(|a, b| a.start.total_cmp(&b.start));
@@ -128,7 +128,7 @@ fn subtitles(content: &str, format: &'static str) -> Imported {
         if let Some((start, end, text)) = cue.take() {
             let text = clean_inline(&text.join(" "));
             if !text.is_empty() {
-                lines.push(LyricLine { text, start, end });
+                lines.push(LyricLine::new(text, start, end));
             }
         }
     };

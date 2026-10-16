@@ -6,6 +6,7 @@ mod app;
 mod backgrounds;
 mod archive;
 mod chunking;
+mod ctc_align;
 mod dev;
 mod download;
 mod engine;

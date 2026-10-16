@@ -42,7 +42,7 @@ fn body(app: &mut StageWeaveApp, ui: &mut Ui) {
     let downloaded = views.values().filter(|v| v.is_downloaded()).count();
     let on_disk: u64 = views.values().map(|v| v.record.bytes_on_disk).sum();
     ui.horizontal(|ui| {
-        ui.label(RichText::new("Separation models").size(15.0).color(Color32::WHITE));
+        ui.label(RichText::new("Models").size(15.0).color(Color32::WHITE));
         ui.label(
             RichText::new(format!("{downloaded} of {} downloaded · {} on disk", keys.len(), human_bytes(on_disk)))
                 .size(11.5)
@@ -83,10 +83,26 @@ fn body(app: &mut StageWeaveApp, ui: &mut Ui) {
             let Some(view) = views.get(&key) else { continue };
             let avg = mm.store.separation_seconds(&key);
             let ctx = ui.ctx().clone();
-            model_row(ui, &model, view, avg, ready, |action| match action {
+            let id = Identity { name: &model.name, tag: &model.tag, tag_good: model.tag == "Best", description: &model.description, stems: &model.stems };
+            model_row(ui, id, view, avg, ready, |action| match action {
                 Action::Download => mm.download(&ctx, &key),
                 Action::Cancel => mm.cancel(&key),
                 Action::Delete => mm.delete(&ctx, &key),
+            });
+            ui.add_space(4.0);
+        }
+
+        // Lyrics alignment: its own task, never offered for separation.
+        section_label(ui, "Lyrics alignment");
+        for model in crate::engine::local_align::ALIGN_MODELS {
+            let Some(view) = views.get(model.key) else { continue };
+            let ctx = ui.ctx().clone();
+            let tag = if model.recommended { "Recommended" } else { "" };
+            let id = Identity { name: model.name, tag, tag_good: model.recommended, description: model.description, stems: &[] };
+            model_row(ui, id, view, None, ready, |action| match action {
+                Action::Download => mm.download(&ctx, model.key),
+                Action::Cancel => mm.cancel(model.key),
+                Action::Delete => mm.delete(&ctx, model.key),
             });
             ui.add_space(4.0);
         }
@@ -119,9 +135,18 @@ enum Action {
     Delete,
 }
 
+/// What a model row shows on the left.
+struct Identity<'a> {
+    name: &'a str,
+    tag: &'a str,
+    tag_good: bool,
+    description: &'a str,
+    stems: &'a [crate::model::StemKind],
+}
+
 fn model_row(
     ui: &mut Ui,
-    model: &crate::engine::SplitModel,
+    model: Identity,
     view: &ModelView,
     avg_seconds: Option<f64>,
     ready: bool,
@@ -140,14 +165,17 @@ fn model_row(
                 ui.vertical(|ui| {
                     ui.set_width(220.0);
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(&model.name).strong().color(Color32::WHITE));
-                        let tag_color = if model.tag == "Best" { SUCCESS } else { TEXT_DIM };
-                        ui.label(RichText::new(&model.tag).size(10.0).color(tag_color));
+                        ui.label(RichText::new(model.name).strong().color(Color32::WHITE));
+                        let tag_color = if model.tag_good { SUCCESS } else { TEXT_DIM };
+                        ui.label(RichText::new(model.tag).size(10.0).color(tag_color));
                     });
-                    ui.label(RichText::new(&model.description).size(11.0).color(TEXT_DIM));
-                    let (r, _) = ui.allocate_exact_size(vec2(12.0 * model.stems.len() as f32, 10.0), Sense::hover());
-                    for (i, k) in model.stems.iter().enumerate() {
-                        ui.painter().circle_filled(egui::pos2(r.left() + 5.0 + i as f32 * 12.0, r.center().y), 4.0, k.color());
+                    ui.add(egui::Label::new(RichText::new(model.description).size(11.0).color(TEXT_DIM)).wrap());
+                    if !model.stems.is_empty() {
+                        let (r, _) = ui.allocate_exact_size(vec2(13.0 * model.stems.len() as f32, 11.0), Sense::hover());
+                        for (i, k) in model.stems.iter().enumerate() {
+                            let c = egui::pos2(r.left() + 5.5 + i as f32 * 13.0, r.center().y);
+                            super::widgets::paint_stem_icon(ui.painter(), egui::Rect::from_center_size(c, vec2(10.0, 10.0)), *k, k.color());
+                        }
                     }
                 });
 

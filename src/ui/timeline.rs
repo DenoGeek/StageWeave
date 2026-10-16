@@ -840,6 +840,18 @@ fn lyric_row(app: &mut StageWeaveApp, ui: &mut Ui, painter: &egui::Painter, clip
             Color32::from_rgb(70, 72, 82)
         };
         lp.rect_filled(r, 3.0, fill);
+        // Word timings (from Align): a tick where each word starts.
+        if line.words.len() > 1 && line.words.len() == line.text.split_whitespace().count() {
+            let tick = if active || tap { Color32::from_black_alpha(110) } else { Color32::from_white_alpha(70) };
+            let mut last_x = f32::NEG_INFINITY;
+            for w in &line.words[1..] {
+                let x = view.x(w.start);
+                if x > r.left() + 2.0 && x < r.right() - 2.0 && x - last_x >= 3.0 {
+                    lp.line_segment([pos2(x, r.bottom() - 5.0), pos2(x, r.bottom() - 1.0)], Stroke::new(1.0, tick));
+                    last_x = x;
+                }
+            }
+        }
         if is_sel {
             lp.rect_stroke(r, 3.0, Stroke::new(2.0, ACCENT_BRIGHT), egui::StrokeKind::Inside);
         }

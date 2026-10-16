@@ -20,8 +20,22 @@ pub enum WorkerMsg {
     Download { done: u64, total: Option<u64>, file: String },
     Model { key: String, downloaded: bool, on_disk: u64, total: Option<u64> },
     Stem(StemKind, PathBuf),
+    /// Per-frame log-probabilities written by `emissions` (lyrics alignment).
+    Emissions(EmissionsInfo),
     Done,
     Error(String),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EmissionsInfo {
+    pub path: PathBuf,
+    pub frames: usize,
+    pub classes: usize,
+    pub stride: f64,
+    pub vocab: std::collections::HashMap<String, usize>,
+    pub load_s: f64,
+    pub infer_s: f64,
+    pub peak_rss_mb: Option<f64>,
 }
 
 pub fn stem_kind(name: &str) -> Option<StemKind> {
@@ -56,6 +70,16 @@ pub fn parse_line(line: &str) -> Option<WorkerMsg> {
             total: v["total"].as_u64().filter(|t| *t > 0),
         },
         "stem" => WorkerMsg::Stem(stem_kind(v["kind"].as_str()?)?, PathBuf::from(v["path"].as_str()?)),
+        "emissions" => WorkerMsg::Emissions(EmissionsInfo {
+            path: PathBuf::from(v["path"].as_str()?),
+            frames: v["frames"].as_u64()? as usize,
+            classes: v["classes"].as_u64()? as usize,
+            stride: v["stride"].as_f64()?,
+            vocab: serde_json::from_value(v["vocab"].clone()).ok()?,
+            load_s: v["load_s"].as_f64().unwrap_or(0.0),
+            infer_s: v["infer_s"].as_f64().unwrap_or(0.0),
+            peak_rss_mb: v["peak_rss_mb"].as_f64(),
+        }),
         "done" => WorkerMsg::Done,
         "error" => WorkerMsg::Error(v["msg"].as_str().unwrap_or("Unknown error").to_owned()),
         _ => return None,
@@ -169,6 +193,18 @@ mod tests {
         );
         assert_eq!(parse_line(r#"{"t":"done"}"#), Some(WorkerMsg::Done));
         assert_eq!(parse_line(r#"{"t":"error","msg":"boom"}"#), Some(WorkerMsg::Error("boom".into())));
+    }
+
+    #[test]
+    fn parses_emissions() {
+        let line = r#"{"t":"emissions","path":"/tmp/e.f32","frames":20140,"classes":32,"stride":0.02,"vocab":{"<pad>":0,"|":4,"A":7},"load_s":0.22,"infer_s":21.3,"peak_rss_mb":651.3}"#;
+        let Some(WorkerMsg::Emissions(e)) = parse_line(line) else { panic!("not parsed") };
+        assert_eq!((e.frames, e.classes, e.stride), (20140, 32, 0.02));
+        assert_eq!(e.vocab["<pad>"], 0);
+        assert_eq!(e.peak_rss_mb, Some(651.3));
+        // Windows reports no peak memory.
+        let line = r#"{"t":"emissions","path":"/e","frames":1,"classes":32,"stride":0.02,"vocab":{},"peak_rss_mb":null}"#;
+        assert!(matches!(parse_line(line), Some(WorkerMsg::Emissions(EmissionsInfo { peak_rss_mb: None, .. }))));
     }
 
     #[test]

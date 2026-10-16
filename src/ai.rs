@@ -489,7 +489,7 @@ pub fn segments_to_lines(segments: &[Segment]) -> Vec<LyricLine> {
             continue;
         }
         if text.chars().count() <= MAX_CHARS {
-            out.push(LyricLine { text: text.to_owned(), start: s.start, end: s.end });
+            out.push(LyricLine::new(text.to_owned(), s.start, s.end));
             continue;
         }
         // Split at commas / sentence ends, timing pieces by character share.
@@ -514,7 +514,7 @@ pub fn segments_to_lines(segments: &[Segment]) -> Vec<LyricLine> {
         let mut t = s.start;
         for p in pieces {
             let len = (s.end - s.start) * p.chars().count() as f64 / total as f64;
-            out.push(LyricLine { text: p.trim_end_matches(',').to_owned(), start: t, end: t + len });
+            out.push(LyricLine::new(p.trim_end_matches(',').to_owned(), t, t + len));
             t += len;
         }
     }
@@ -744,6 +744,8 @@ pub enum JobResult {
 
 pub enum JobEvent {
     Stage(String),
+    /// 0–1, or negative for "working, no estimate".
+    Progress(f32),
     Done(Result<JobResult, String>),
 }
 
@@ -752,6 +754,8 @@ pub struct TranscribeJob {
     pub rx: Receiver<JobEvent>,
     pub cancel: Arc<AtomicBool>,
     pub stage: String,
+    /// Latest progress (0–1) when the job reports it.
+    pub progress: Option<f32>,
     pub started: std::time::Instant,
 }
 
@@ -916,7 +920,7 @@ impl TranscribeJob {
             }
             send(JobEvent::Done(result));
         });
-        Self { song_id, rx, cancel, stage: "Starting…".into(), started: std::time::Instant::now() }
+        Self { song_id, rx, cancel, stage: "Starting…".into(), progress: None, started: std::time::Instant::now() }
     }
 }
 

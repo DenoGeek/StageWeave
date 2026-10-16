@@ -128,7 +128,7 @@ pub fn start(app: &mut StageWeaveApp, ctx: &egui::Context) {
                         .lines()
                         .filter(|l| !l.trim().is_empty())
                         .enumerate()
-                        .map(|(i, l)| crate::model::LyricLine { text: l.into(), start: 14.0 + i as f64 * 9.5, end: 23.0 + i as f64 * 9.5 })
+                        .map(|(i, l)| crate::model::LyricLine::new(l.to_string(), 14.0 + i as f64 * 9.5, 23.0 + i as f64 * 9.5))
                         .collect();
                     app.ai_panel.result =
                         Some((first, crate::app::AiResult::Transcript(crate::ai::Transcript { note: None, text: DEMO_LYRICS.into(), language: Some("english".into()), lines })));
