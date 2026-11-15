@@ -1,0 +1,39 @@
+{
+  "type": "state",
+  "state": {
+    "projects": [
+      { "id": 1, "name": "Sunday 15 Nov", "items": 3 },
+      { "id": 2, "name": "Youth Night", "items": 5 }
+    ],
+    "project": { "id": 1, "name": "Sunday 15 Nov", "items": 3 },
+    "items": [
+      { "id": 10, "title": "Way Maker", "artist": "Sinach", "kind": "song", "duration": 301.5, "ready": true },
+      { "id": 11, "title": "Timeless Gospel", "artist": "Neema Gospel Choir", "kind": "youtube", "duration": 437.3, "ready": true },
+      { "id": 12, "title": "Announcements", "artist": "", "kind": "deck", "duration": 0.0, "ready": false }
+    ],
+    "current": {
+      "id": 10,
+      "title": "Way Maker",
+      "artist": "Sinach",
+      "kind": "song",
+      "playing": true,
+      "loading": false,
+      "position": 42.3,
+      "duration": 301.5,
+      "loop": true,
+      "cues": [{ "name": "Chorus", "start": 60.0, "end": 92.5 }],
+      "active_cue": null,
+      "sections": [
+        { "name": "Verse 1", "start": 10.0, "end": 58.0 },
+        { "name": "Bridge", "start": 180.0, "end": 220.0 }
+      ],
+      "current_section": 0,
+      "tracks": [
+        { "name": "Vocals", "kind": "vocals", "muted": false, "solo": false, "gain_db": 0.0 },
+        { "name": "Drums", "kind": "drums", "muted": true, "solo": false, "gain_db": -6.0 }
+      ],
+      "master_db": 0.0,
+      "deck": null
+    }
+  }
+}

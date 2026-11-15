@@ -13,6 +13,9 @@
 #   macOS    StageWeave_<ver>_aarch64.dmg        (Apple Silicon)
 #            StageWeave_<ver>_x64.dmg            (Intel, cross-compiled on an arm64 runner;
 #                                               the macos-13 Intel runner image is retired)
+#   Android  StageWeave-Remote_<ver>.apk         (the phone remote, Flutter app in mobileapp/)
+#
+# Layout: the desktop app lives in software/, the phone remote in mobileapp/.
 #
 # Unsigned builds
 #   macOS: the app is not signed or notarized, so Gatekeeper will say it "is damaged"
@@ -67,6 +70,7 @@ jobs:
     defaults:
       run:
         shell: bash
+        working-directory: software
 
     steps:
       - name: Checkout
@@ -100,6 +104,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+          workspaces: software
 
       # cargo-packager ships no prebuilt binaries, so build it. rust-cache keeps
       # ~/.cargo/bin, and `cargo install` is a no-op when this version is cached.
@@ -144,13 +149,86 @@ jobs:
           name: installers-${{ matrix.name }}
           if-no-files-found: error
           path: |
-            target/packages/*.deb
-            target/packages/*.exe
-            target/packages/*.dmg
+            software/target/packages/*.deb
+            software/target/packages/*.exe
+            software/target/packages/*.dmg
+
+  android:
+    name: Package (android remote)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: mobileapp
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.44.6"
+          cache: true
+
+      # The remote shares the desktop app's version (software/Cargo.toml).
+      - name: Read version
+        run: |
+          VERSION=$(grep -m1 '^version = ' ../software/Cargo.toml | cut -d '"' -f2)
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match software/Cargo.toml version ${VERSION}"
+            exit 1
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      # Optional release signing: set the ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
+      # ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD secrets. Without them the APK is
+      # signed with a debug key (installable, but updates need the same key).
+      - name: Set up signing
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE" ]; then
+            echo "$KEYSTORE" | base64 -d > android/app/release.jks
+            printf 'storeFile=release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+              "$STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > android/key.properties
+          else
+            echo "::warning::No Android signing secrets; the APK is signed with a debug key"
+          fi
+
+      - name: Test
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+
+      - name: Build APK
+        run: |
+          BUILD_NUMBER=$(echo "$VERSION" | awk -F. '{ print $1 * 10000 + $2 * 100 + $3 }')
+          flutter build apk --release --build-name "$VERSION" --build-number "$BUILD_NUMBER"
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk "dist/StageWeave-Remote_${VERSION}.apk"
+          ls -la dist
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-android
+          if-no-files-found: error
+          path: mobileapp/dist/*.apk
 
   release:
     name: Publish GitHub Release
-    needs: package
+    needs: [package, android]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -176,6 +254,7 @@ jobs:
             - **macOS (Apple Silicon)**: `StageWeave_*_aarch64.dmg`
             - **macOS (Intel)**: `StageWeave_*_x64.dmg`
             - **Linux (Debian/Ubuntu)**: `stageweave_*_amd64.deb` (`sudo apt install ./stageweave_*_amd64.deb`)
+            - **Android remote**: `StageWeave-Remote_*.apk`. Install it on a phone on the same Wi-Fi as StageWeave, then turn on **Remote control** in StageWeave's Settings. You may need to allow installing apps from your browser.
 
             These builds are not code-signed.
             - **macOS**: drag StageWeave into **Applications** first. If it then says the app "is damaged" or "can't be opened", run this in Terminal:

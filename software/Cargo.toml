@@ -1,0 +1,43 @@
+[package]
+name = "stageweave"
+version = "0.1.4"
+edition = "2024"
+
+[dependencies]
+arc-swap = "1"
+cpal = "0.18"
+directories = "6"
+eframe = "0.36"
+egui = "0.36"
+egui-wgpu = "0.36"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+lzma-rs = "0.3"
+pollster = "0.4"
+# Renders slide decks (PDF, or PowerPoint converted by LibreOffice) to images.
+# The pdfium library itself is downloaded on first use; its build matches these bindings.
+pdfium-render = { version = "0.9.5", default-features = false, features = ["pdfium_8125", "image_025", "thread_safe"] }
+quick-xml = "0.42"
+flate2 = "1"
+rfd = "0.17"
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+symphonia = { version = "0.5", features = ["all"] }
+tar = "0.4"
+ureq = "3"
+zip = "9"
+tungstenite = "0.30"
+mdns-sd = "0.21.7"
+getrandom = "0.4.3"
+if-addrs = "0.15.0"
+gethostname = "1.1.0"
+
+# Keep egui snappy in debug builds.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+
+[dev-dependencies]
+egui_kittest = "0.36"
