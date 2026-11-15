@@ -72,9 +72,24 @@ xattr -dr com.apple.quarantine /Applications/StageWeave.app
 ### What gets downloaded on first use
 
 - **Separation engine.** The first split installs a private Python environment with PyTorch, Demucs and UVR (about 2 GB) into the app-data folder. Models are fetched when you first use them. You can manage them in **Window → Models**.
-- **ffmpeg.** It's needed for video backgrounds and MP4 export. StageWeave uses the ffmpeg on your PATH if there is one, otherwise it downloads a static build once.
+- **ffmpeg.** It's needed for video backgrounds, MP4 export, YouTube songs and some separation models (UVR, MDX and RoFormer). StageWeave uses an installed ffmpeg (the one on your PATH, or Homebrew's in `/opt/homebrew/bin` or `/usr/local/bin`). Otherwise it downloads a static build once, the first time you need it.
 - **yt-dlp.** The first YouTube song downloads the standalone [yt-dlp](https://github.com/yt-dlp/yt-dlp) once. YouTube changes often, so update it from **Window → Models** if downloads stop working.
 - **Slides.** PowerPoint, Keynote and OpenDocument files are converted with [LibreOffice](https://www.libreoffice.org) if it's installed (it isn't downloaded for you). Without it, export the deck as a PDF or images and add those. Pages are rendered with [PDFium](https://pdfium.googlesource.com/pdfium/), downloaded once (about 6 MB).
+
+### Caveats
+
+- **Splitting fails with `No such file or directory: 'ffmpeg'`.** StageWeave couldn't find ffmpeg for the separation engine. **Reinstall Engine** (in Settings) won't help, because ffmpeg isn't part of the engine. Any of these will:
+  - Install ffmpeg (`brew install ffmpeg` on macOS), or let StageWeave download its own copy with **Download ffmpeg** in the Export panel, then restart StageWeave.
+  - Versions before 0.1.6 didn't pass Homebrew's folder to the engine when opened from Finder or the Dock. Update, or start StageWeave from Terminal so it gets your shell's PATH:
+    ```sh
+    /Applications/StageWeave.app/Contents/MacOS/stageweave
+    ```
+  - Or split with a Demucs model (such as `htdemucs`), which mostly reads audio without ffmpeg.
+- **macOS apps don't see your shell's PATH.** Tools installed with Homebrew (`ffmpeg`, `yt-dlp`) are in `/opt/homebrew/bin` (Apple Silicon) or `/usr/local/bin` (Intel). StageWeave searches those folders itself. If you keep tools elsewhere, start StageWeave from Terminal, or give every app a PATH and restart the Mac:
+  ```sh
+  sudo launchctl config user path "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+  ```
+- **Reinstall Engine only reinstalls the Python environment** (PyTorch, Demucs, UVR). It doesn't install ffmpeg, yt-dlp or LibreOffice.
 
 ## Keyboard shortcuts
 

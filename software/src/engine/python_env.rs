@@ -290,6 +290,9 @@ impl PythonEnv {
             .env("HF_HUB_DISABLE_TELEMETRY", "1")
             .env("PYTHONIOENCODING", "utf-8")
             .env("PYTHONUNBUFFERED", "1");
+        if let Some(path) = worker_path(&self.paths.root, std::env::var_os("PATH")) {
+            cmd.env("PATH", path);
+        }
         Ok(cmd)
     }
 
@@ -548,9 +551,49 @@ fn download_uv(dir: &Path, dest: &Path, log: impl Fn(String)) -> Result<(), Stri
     Ok(())
 }
 
+/// Places ffmpeg is usually installed outside the default app PATH.
+const FFMPEG_DIRS: [&str; 3] = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
+
+/// PATH for the worker, so Python libraries that run `ffmpeg` find it. Apps opened from
+/// Finder or the Dock on macOS don't get the shell's PATH, so Homebrew's folder is missing.
+/// Order: StageWeave's own ffmpeg download, the inherited PATH, then the usual install folders.
+fn worker_path(engine_root: &Path, inherited: Option<std::ffi::OsString>) -> Option<std::ffi::OsString> {
+    let mut dirs: Vec<PathBuf> = vec![engine_root.join("ffmpeg")];
+    dirs.extend(inherited.iter().flat_map(std::env::split_paths));
+    if !cfg!(windows) {
+        dirs.extend(FFMPEG_DIRS.iter().map(PathBuf::from).filter(|d| d.is_dir()));
+    }
+    let mut seen = std::collections::HashSet::new();
+    dirs.retain(|d| !d.as_os_str().is_empty() && seen.insert(d.clone()));
+    std::env::join_paths(dirs).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn worker_path_finds_ffmpeg_outside_the_app_path() {
+        let root = Path::new("/data/StageWeave/engine");
+        let path = worker_path(root, Some("/usr/bin:/bin".into())).unwrap();
+        let dirs: Vec<PathBuf> = std::env::split_paths(&path).collect();
+        // StageWeave's own ffmpeg comes first, then the inherited PATH in its order.
+        assert_eq!(dirs[0], root.join("ffmpeg"));
+        assert_eq!(&dirs[1..3], [PathBuf::from("/usr/bin"), PathBuf::from("/bin")]);
+        // Install folders that exist are added once, after the inherited ones.
+        for d in FFMPEG_DIRS.iter().filter(|d| Path::new(d).is_dir()) {
+            assert_eq!(dirs.iter().filter(|x| x.as_path() == Path::new(d)).count(), 1, "{d}");
+        }
+        // No inherited PATH still gives a usable one.
+        assert!(worker_path(root, None).is_some());
+        // With a Dock app's bare PATH, a Homebrew ffmpeg is found by name.
+        if Path::new("/opt/homebrew/bin/ffmpeg").is_file() {
+            let bare = Some("/usr/bin:/bin:/usr/sbin:/sbin".into());
+            let found = Command::new("/bin/sh").args(["-c", "command -v ffmpeg"]).env("PATH", worker_path(root, bare).unwrap()).output().unwrap();
+            assert_eq!(String::from_utf8_lossy(&found.stdout).trim(), "/opt/homebrew/bin/ffmpeg");
+        }
+    }
 
     #[test]
     fn extra_goes_before_version() {
