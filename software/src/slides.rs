@@ -263,6 +263,21 @@ pub fn import(sources: &[PathBuf], out: &Path, tools: &DeckTools, report: &dyn F
     Ok(deck)
 }
 
+/// A `file:///` URL for LibreOffice. Unescaped spaces (as in macOS's
+/// "Application Support") make LibreOffice abort at startup, so escape everything
+/// except unreserved characters, `/` and a Windows drive's `:`.
+fn file_url(path: &Path) -> String {
+    let p = path.to_string_lossy().replace('\\', "/");
+    let mut out = String::from("file:///");
+    for b in p.trim_start_matches('/').bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' | b':' => out.push(b as char),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 /// Office document → PDF with LibreOffice (headless).
 fn to_pdf(src: &Path, out: &Path) -> Result<PathBuf, String> {
     let soffice = locate_soffice().ok_or(
@@ -271,7 +286,7 @@ fn to_pdf(src: &Path, out: &Path) -> Result<PathBuf, String> {
     let tmp = out.join(".convert");
     let _ = std::fs::create_dir_all(&tmp);
     // A private profile, so a LibreOffice window that's already open doesn't block us.
-    let profile = format!("file:///{}", tmp.join("profile").to_string_lossy().replace('\\', "/").trim_start_matches('/'));
+    let profile = file_url(&tmp.join("profile"));
     let o = background_command(&soffice)
         .arg(format!("-env:UserInstallation={profile}"))
         .args(["--headless", "--norestore", "--convert-to", "pdf", "--outdir"])
@@ -698,6 +713,34 @@ mod tests {
         assert_eq!((v.file.as_str(), v.kind, v.autoplay, v.looping), ("media/media1.mp4", MediaKind::Video, true, true));
         assert!((v.rect[0] - 0.1).abs() < 1e-3 && (v.rect[2] - 0.5).abs() < 1e-3);
         assert_eq!(std::fs::read(out.join("media/media2.m4a")).unwrap(), b"audio bytes");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn libreoffice_profile_urls_are_escaped() {
+        assert_eq!(
+            file_url(Path::new("/Users/me/Library/Application Support/StageWeave/x/.convert/profile")),
+            "file:///Users/me/Library/Application%20Support/StageWeave/x/.convert/profile"
+        );
+        assert_eq!(file_url(Path::new(r"C:\Users\Me Too\p")), "file:///C:/Users/Me%20Too/p");
+        assert_eq!(file_url(Path::new("/a/é#%")), "file:///a/%C3%A9%23%25");
+    }
+
+    /// LibreOffice used to abort when the app-data path had a space (macOS
+    /// "Application Support"). Runs when LibreOffice is installed.
+    #[test]
+    fn libreoffice_converts_in_a_folder_with_spaces() {
+        if locate_soffice().is_none() {
+            eprintln!("LibreOffice not installed; skipping");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("sw deck spaces {}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("notes.txt");
+        std::fs::write(&src, "Hello").unwrap();
+        let pdf = to_pdf(&src, &dir).unwrap();
+        assert!(pdf.is_file() && !dir.join(".convert").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
